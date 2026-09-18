@@ -182,10 +182,14 @@ def build_pptx(
     to_date:   date | None = None,
     white_bg:  bool = True,
 ) -> str:
-    try:
-        pptx = __import__("pptxgenjs")
-    except ImportError:
-        raise ImportError("pptxgenjs not found — run: npm install pptxgenjs")
+    """
+    Build the two-chart PPTX slide via pptxgenjs (Node.js library).
+    Serialises chart data to JSON, then calls: node generate_pptx.js data.json
+    Requires pptxgenjs installed: npm install pptxgenjs  (run once in this folder)
+    """
+    import json
+    import subprocess
+    import tempfile
 
     if to_date is None:
         to_date = df["date"].max()
@@ -200,167 +204,47 @@ def build_pptx(
 
     Path(path).parent.mkdir(exist_ok=True)
 
-    bg   = "FFFFFF" if white_bg else "0F1823"
-    surf = "F4F7FB" if white_bg else "151F2E"
-    grid = "DCE8F0" if white_bg else "1E2E42"
-    text = "1A2A3A" if white_bg else "C8D8E8"
-    muted= "7A96B0"
-
-    pres = pptx.create()
-    pres.layout = "LAYOUT_WIDE"
-
-    slide = pres.addSlide()
-
-    # Background
-    slide.addShape(pres.ShapeType.rect, {
-        "x": 0, "y": 0, "w": "100%", "h": "100%",
-        "fill": {"color": bg},
-    })
-
-    # Run date and provisional note
     run_date_str = date.today().strftime("%d %b %Y")
-    period_str   = f"{month_labels[0]} – {month_labels[-1]}"
-    prov_note    = (f"  ·  {len(provisional_months)} month(s) provisional"
-                    if provisional_months else "")
+    period_str   = (f"{month_labels[0]} – {month_labels[-1]}"
+                    if month_labels else "")
+    sources_list = sorted({c["source"] for c in coverage})
 
-    slide.addText("European Natural Gas Demand Monitor", {
-        "x": 0.4, "y": 0.22, "w": 12, "h": 0.35,
-        "fontSize": 16, "bold": True, "color": text,
-        "fontFace": "Calibri", "isTextBox": True, "margin": 0,
-    })
+    payload = {
+        "outputPath":       str(Path(path).resolve()),
+        "white_bg":         white_bg,
+        "run_date":         run_date_str,
+        "period_str":       period_str,
+        "month_labels":     month_labels,
+        "country_series":   country_series,
+        "abs_dev":          abs_dev,
+        "pct_dev":          pct_dev,
+        "provisional_count": len(provisional_months),
+        "sources":          sources_list,
+        "MAJOR":            MAJOR,
+        "COUNTRY_COLORS":   COUNTRY_COLORS,
+        "COUNTRY_NAMES":    COUNTRY_NAMES,
+    }
 
-    slide.addText(
-        f"Last 12 months  ·  {period_str}  ·  Data as of {run_date_str}{prov_note}",
-        {
-            "x": 0.4, "y": 0.58, "w": 12, "h": 0.22,
-            "fontSize": 9, "color": muted, "fontFace": "Calibri",
-            "isTextBox": True, "margin": 0,
-        }
-    )
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False, encoding="utf-8"
+    ) as tmp:
+        json.dump(payload, tmp)
+        tmp_path = tmp.name
 
-    # ── Chart 1: Stacked column ───────────────────────────────────────────────
-    display_countries = MAJOR + ["Other"]
-    chart1_data = [
-        {
-            "name":   COUNTRY_NAMES.get(c, c),
-            "labels": month_labels,
-            "values": country_series[c],
-        }
-        for c in display_countries
-    ]
+    script = Path(__file__).parent / "generate_pptx.js"
+    try:
+        result = subprocess.run(
+            ["node", str(script), tmp_path],
+            capture_output=True, text=True, timeout=60,
+        )
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
 
-    slide.addText("Monthly gas consumption by country  (TWh)", {
-        "x": 0.4, "y": 0.9, "w": 6, "h": 0.25,
-        "fontSize": 10, "bold": True, "color": text,
-        "fontFace": "Calibri", "isTextBox": True, "margin": 0,
-    })
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"generate_pptx.js failed (exit {result.returncode}):\n"
+            f"{result.stderr.strip() or result.stdout.strip()}"
+        )
 
-    slide.addChart(pres.ChartType.bar, chart1_data, {
-        "x": 0.4, "y": 1.18, "w": 6.1, "h": 5.5,
-        "barDir": "col",
-        "barGrouping": "stacked",
-        "chartColors": [COUNTRY_COLORS.get(c, "AAAAAA") for c in display_countries],
-        "showLegend": True,
-        "legendPos": "b",
-        "legendFontSize": 8,
-        "legendColor": text,
-        "showValue": False,
-        "catAxisLabelColor": muted,
-        "valAxisLabelColor": muted,
-        "valAxisLabelFontSize": 8,
-        "catAxisLabelFontSize": 8,
-        "valGridLine": {"color": grid, "size": 0.5},
-        "catGridLine": {"style": "none"},
-        "plotArea": {"fill": {"color": surf}},
-        "chartArea": {"fill": {"color": bg}, "border": {"color": bg}},
-        "showTitle": False,
-        "valAxisMinVal": 0,
-    })
-
-    # ── Chart 2: Deviation combo ──────────────────────────────────────────────
-    slide.addText("Demand deviation vs 2019–21 average  (bars = TWh · line = %)", {
-        "x": 6.85, "y": 0.9, "w": 6.1, "h": 0.25,
-        "fontSize": 10, "bold": True, "color": text,
-        "fontFace": "Calibri", "isTextBox": True, "margin": 0,
-    })
-
-    val_min = min(abs_dev) * 1.1 if abs_dev else -120
-    pct_min = min(pct_dev) * 1.1 if pct_dev else -30
-
-    slide.addChart(
-        [
-            {
-                "type": pres.ChartType.bar,
-                "data": [{"name": "TWh deviation", "labels": month_labels, "values": abs_dev}],
-                "options": {"chartColors": [AMBER], "barDir": "col"},
-            },
-            {
-                "type": pres.ChartType.line,
-                "data": [{"name": "% vs baseline", "labels": month_labels, "values": pct_dev}],
-                "options": {
-                    "chartColors": [GREEN],
-                    "lineSize": 2,
-                    "lineSmooth": True,
-                    "secondaryValAxis": True,
-                    "secondaryCatAxis": True,
-                },
-            },
-        ],
-        {
-            "x": 6.85, "y": 1.18, "w": 6.1, "h": 5.5,
-            "valAxes": [
-                {
-                    "showValAxisTitle": False,
-                    "valAxisMinVal": val_min,
-                    "valAxisMaxVal": 0,
-                    "valAxisLabelColor": muted,
-                    "valAxisLabelFontSize": 8,
-                    "valGridLine": {"color": grid, "size": 0.5},
-                },
-                {
-                    "showValAxisTitle": False,
-                    "valAxisMinVal": pct_min,
-                    "valAxisMaxVal": 0,
-                    "valAxisLabelColor": GREEN,
-                    "valAxisLabelFontSize": 8,
-                    "valGridLine": {"style": "none"},
-                    "valAxisCrossesAt": "autoZero",
-                },
-            ],
-            "catAxes": [
-                {"catAxisLabelColor": muted, "catAxisLabelFontSize": 8},
-                {"catAxisHide": True},
-            ],
-            "showLegend": True,
-            "legendPos": "b",
-            "legendFontSize": 8,
-            "legendColor": text,
-            "plotArea": {"fill": {"color": surf}},
-            "chartArea": {"fill": {"color": bg}, "border": {"color": bg}},
-            "showTitle": False,
-        }
-    )
-
-    # ── Source footnote ───────────────────────────────────────────────────────
-    sources = list({c["source"] for c in coverage})
-    source_str = "Sources: " + "  ·  ".join(sorted(sources)[:6])
-    if provisional_months:
-        source_str += "  ·  * Provisional months may be revised"
-
-    slide.addText(source_str, {
-        "x": 0.4, "y": 7.15, "w": 12.5, "h": 0.2,
-        "fontSize": 7, "color": muted, "fontFace": "Calibri",
-        "isTextBox": True, "margin": 0,
-    })
-
-    slide.addNotes(
-        f"Data as of {run_date_str}. "
-        f"Baseline: 2019–2021 monthly average. "
-        f"Flow-derived countries (SK, LV, LT, EE, FI, SE): "
-        f"consumption estimated from ENTSOG border flow mass balance. "
-        f"Other EU: remaining countries aggregated."
-    )
-
-    pres.writeFile({"fileName": path})
     print(f"Saved: {path}")
     return path

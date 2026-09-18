@@ -64,11 +64,12 @@ class BaseExtractor(ABC):
     def _validate(self, df: pd.DataFrame) -> pd.DataFrame:
         if df.empty:
             return self._empty()
-        df["date"]    = pd.to_datetime(df["date"]).dt.date
-        df["country"] = self.country
-        df["source"]  = self.source
-        df["method"]  = self.method
-        df["twh"]     = pd.to_numeric(df["twh"], errors="coerce")
+        df["date"]        = pd.to_datetime(df["date"]).dt.date
+        df["country"]     = self.country
+        df["source"]      = self.source
+        df["method"]      = self.method
+        df["twh"]         = pd.to_numeric(df["twh"], errors="coerce")
+        df["provisional"] = df.get("provisional", False)
         df = df.dropna(subset=["date", "twh"])
         df = df[df["twh"] >= 0]
         return df[SCHEMA]
