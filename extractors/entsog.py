@@ -2,12 +2,15 @@
 ENTSOG Transparency Platform extractor.
 
 Used for:
-  - Direct consumption: NL, BE, PL, and any country reporting
-    consumption at distribution exit points
-  - Flow derivation input: SK, LV, LT, EE, FI, SE
+  - Border flow derivation: SK, LV, LT, EE, FI, SE
     (handled separately in flow_derived.py, which calls this)
 
-API docs: https://transparency.entsog.eu/api/v1/
+API notes (verified Sep 2026):
+  - /operationalData requires a specific pointKey to return data; country-level
+    queries always return empty. Two-step approach: first query /interconnections
+    to discover border point keys, then fetch per-point flow data.
+  - /AggregatedData endpoint does not return data; not used.
+  - Response key for operationalData queries is "operationalData" (lowercase).
 """
 
 from datetime import date
@@ -20,11 +23,8 @@ logger = logging.getLogger(__name__)
 
 ENTSOG_BASE = "https://transparency.entsog.eu/api/v1"
 
-# Indicator labels used on the platform
-CONSUMPTION_INDICATOR = "Physical Consumption"
-FLOW_INDICATOR        = "Physical Flow"
+FLOW_INDICATOR = "Physical Flow"
 
-# Country codes as ENTSOG uses them (mostly ISO2, GB not UK)
 ENTSOG_COUNTRY_MAP = {
     "NL": "NL", "BE": "BE", "PL": "PL",
     "SK": "SK", "LV": "LV", "LT": "LT",
@@ -34,12 +34,16 @@ ENTSOG_COUNTRY_MAP = {
     "CZ": "CZ", "HU": "HU", "RO": "RO",
 }
 
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (compatible; gas-demand-pipeline/1.0; research use)"
+}
+
 
 def _query(endpoint: str, params: dict, timeout: int = 60) -> dict:
     """Raw ENTSOG API call with error handling."""
     url = f"{ENTSOG_BASE}/{endpoint}"
     try:
-        r = requests.get(url, params=params, timeout=timeout)
+        r = requests.get(url, params=params, headers=HEADERS, timeout=timeout)
         r.raise_for_status()
         return r.json()
     except requests.exceptions.Timeout:
@@ -50,69 +54,107 @@ def _query(endpoint: str, params: dict, timeout: int = 60) -> dict:
         raise RuntimeError(f"ENTSOG error: {e}")
 
 
-def fetch_aggregated_consumption(
-    country: str,
+def _get_border_point_keys(country: str) -> dict[str, list[str]]:
+    """
+    Query /interconnections to find the border point keys for a country.
+    Returns {"entry": [pointKeys...], "exit": [pointKeys...]}.
+    Entry = points where gas flows INTO the country.
+    Exit  = points where gas flows OUT OF the country.
+    Only includes Transmission and LNG infrastructure types with data.
+    """
+    entsog_code = ENTSOG_COUNTRY_MAP.get(country)
+    if not entsog_code:
+        return {"entry": [], "exit": []}
+
+    entry_keys = []
+    exit_keys = []
+
+    # Exit points: where country is the source (fromCountryKey)
+    try:
+        data = _query("interconnections", {
+            "fromCountryKey": entsog_code,
+            "limit": 200,
+            "format": "json",
+        })
+        for ic in data.get("interconnections", []):
+            infra = ic.get("fromInfrastructureTypeLabel", "")
+            has_data = ic.get("fromHasData", False)
+            pk = ic.get("fromPointKey")
+            if pk and has_data and ("Transmission" in infra or "LNG" in infra or "Storage" in infra):
+                exit_keys.append(pk)
+    except Exception as e:
+        logger.warning(f"ENTSOG interconnections (exit) for {country}: {e}")
+
+    # Entry points: where country is the destination (toCountryKey)
+    try:
+        data = _query("interconnections", {
+            "toCountryKey": entsog_code,
+            "limit": 200,
+            "format": "json",
+        })
+        for ic in data.get("interconnections", []):
+            infra = ic.get("toInfrastructureTypeLabel", "")
+            has_data = ic.get("toHasData", False)
+            pk = ic.get("toPointKey")
+            if pk and has_data and ("Transmission" in infra or "LNG" in infra or "Storage" in infra):
+                entry_keys.append(pk)
+    except Exception as e:
+        logger.warning(f"ENTSOG interconnections (entry) for {country}: {e}")
+
+    return {
+        "entry": list(dict.fromkeys(entry_keys)),  # deduplicate, preserve order
+        "exit":  list(dict.fromkeys(exit_keys)),
+    }
+
+
+def _fetch_point_flows(
+    point_keys: list[str],
+    direction: str,
     from_date: date,
     to_date: date,
-    period_type: str = "day",
 ) -> pd.DataFrame:
     """
-    Fetch aggregated consumption data for a country from ENTSOG.
-    Returns daily TWh by country.
+    Fetch daily physical flow for a list of point keys, filtering to the given direction.
+    Returns DataFrame with [date, twh] aggregated across all points.
     """
-    params = {
-        "indicator":  CONSUMPTION_INDICATOR,
-        "periodType": period_type,
-        "timezone":   "CET",
-        "from":       from_date.isoformat(),
-        "to":         to_date.isoformat(),
-        "limit":      10000,
-        "format":     "json",
-    }
-    # Filter to country if the API supports it
-    entsog_code = ENTSOG_COUNTRY_MAP.get(country)
-    if entsog_code:
-        params["countryKey"] = entsog_code
+    all_records = []
+    for pk in point_keys:
+        params = {
+            "pointKey":  pk,
+            "indicator": FLOW_INDICATOR,
+            "periodType": "day",
+            "timezone":  "CET",
+            "from":      from_date.isoformat(),
+            "to":        to_date.isoformat(),
+            "limit":     10000,
+            "format":    "json",
+        }
+        try:
+            data = _query("operationalData", params)
+            rows = data.get("operationalData", [])
+            for row in rows:
+                if row.get("directionKey") != direction:
+                    continue
+                val = row.get("value")
+                if val is None or val == "":
+                    continue
+                period = row.get("periodFrom", "")[:10]
+                if not period:
+                    continue
+                try:
+                    twh = float(val) / 1e9  # kWh/day → TWh
+                except (TypeError, ValueError):
+                    continue
+                all_records.append({"date": period, "twh": twh})
+        except Exception as e:
+            logger.debug(f"ENTSOG {direction} flow for {pk}: {e}")
 
-    data = _query("aggregatedData", params)
-    rows = data.get("AggregatedData", [])
-    if not rows:
+    if not all_records:
         return pd.DataFrame()
 
-    records = []
-    for row in rows:
-        # Filter to our target country
-        if row.get("tsoCountry") != entsog_code:
-            continue
-        val_kwh_per_day = row.get("value")
-        if val_kwh_per_day is None:
-            continue
-        period_from = row.get("periodFrom", "")[:10]
-        period_to   = row.get("periodTo",   "")[:10]
-        if not period_from:
-            continue
-
-        # Convert kWh/day → TWh for the period
-        if period_type == "day":
-            twh = float(val_kwh_per_day) / 1e9
-        else:
-            # Monthly: value is total kWh for the month
-            twh = float(val_kwh_per_day) / 1e9
-
-        records.append({
-            "date":    period_from,
-            "country": country,
-            "twh":     twh,
-        })
-
-    df = pd.DataFrame(records)
-    if df.empty:
-        return df
-
-    # Aggregate across operators/points for the same date
+    df = pd.DataFrame(all_records)
     df["date"] = pd.to_datetime(df["date"]).dt.date
-    df = df.groupby(["date", "country"], as_index=False)["twh"].sum()
-    return df
+    return df.groupby("date", as_index=False)["twh"].sum()
 
 
 def fetch_border_flows(
@@ -124,52 +166,22 @@ def fetch_border_flows(
     Fetch entry and exit physical flows at border points for a country.
     Returns {"entry": df, "exit": df} with daily TWh.
     Used by flow_derived.py for mass-balance countries.
+
+    Two-step approach:
+      1. Query /interconnections to discover border point keys.
+      2. Query /operationalData for each point with Physical Flow indicator.
     """
+    point_keys = _get_border_point_keys(country)
+
     result = {}
     for direction in ["entry", "exit"]:
-        params = {
-            "indicator":     FLOW_INDICATOR,
-            "periodType":    "day",
-            "timezone":      "CET",
-            "from":          from_date.isoformat(),
-            "to":            to_date.isoformat(),
-            "limit":         10000,
-            "format":        "json",
-            "pointDirection": direction,
-        }
-        entsog_code = ENTSOG_COUNTRY_MAP.get(country)
-        if entsog_code:
-            params["countryKey"] = entsog_code
-
-        try:
-            data  = _query("operationalData", params)
-            rows  = data.get("Operational", [])
-        except Exception as e:
-            logger.warning(f"ENTSOG {direction} flows for {country}: {e}")
+        keys = point_keys[direction]
+        if not keys:
+            logger.warning(f"ENTSOG: no {direction} points found for {country}")
             result[direction] = pd.DataFrame()
             continue
 
-        records = []
-        for row in rows:
-            val = row.get("value")
-            if val is None:
-                continue
-            period = row.get("periodFrom", "")[:10]
-            if not period:
-                continue
-            # Only cross-border interconnection points (not distribution exits)
-            point_type = row.get("infrastructureTypeLabel", "")
-            if "Interconnection" not in point_type and "LNG" not in point_type:
-                continue
-            records.append({
-                "date": period,
-                "twh":  float(val) / 1e9,
-            })
-
-        df = pd.DataFrame(records)
-        if not df.empty:
-            df["date"] = pd.to_datetime(df["date"]).dt.date
-            df = df.groupby("date", as_index=False)["twh"].sum()
+        df = _fetch_point_flows(keys, direction, from_date, to_date)
         result[direction] = df
 
     return result
@@ -177,8 +189,12 @@ def fetch_border_flows(
 
 class ENTSOGDirectExtractor(BaseExtractor):
     """
-    For countries where ENTSOG aggregated consumption is reliable:
-    NL, BE, PL, and others reporting via distribution exit points.
+    Placeholder extractor for countries that previously used the /AggregatedData
+    endpoint (NL, BE, PL, HU, RO, GR, PT, HR, SI, BG).
+
+    The /AggregatedData endpoint no longer returns data. This class is retained
+    for registry compatibility but returns empty DataFrames until a replacement
+    source is wired up per country.
     """
     method = "direct"
 
@@ -187,8 +203,8 @@ class ENTSOGDirectExtractor(BaseExtractor):
         self.source  = f"ENTSOG ({country})"
 
     def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
-        df = fetch_aggregated_consumption(self.country, from_date, to_date)
-        if df.empty:
-            return df
-        df["provisional"] = False  # set by base class
-        return df
+        logger.warning(
+            f"ENTSOG AggregatedData endpoint is not functional for {self.country}. "
+            "No data returned. Wire up a national TSO source for this country."
+        )
+        return pd.DataFrame()

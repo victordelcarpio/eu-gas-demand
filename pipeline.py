@@ -13,9 +13,12 @@ Returns:
 import logging
 import concurrent.futures
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Optional
 
 import pandas as pd
+
+BASELINE_CACHE_PATH = Path("output/baseline_cache.csv")
 
 from extractors.national import (
     GermanyTHEExtractor,
@@ -120,6 +123,29 @@ def build_coverage(df: pd.DataFrame, from_date: date, to_date: date) -> list[dic
     return sorted(report, key=lambda x: x["country"])
 
 
+# ── Baseline cache helpers ────────────────────────────────────────────────────
+def _load_baseline_cache() -> Optional[pd.DataFrame]:
+    if BASELINE_CACHE_PATH.exists():
+        try:
+            df = pd.read_csv(BASELINE_CACHE_PATH)
+            df["date"] = pd.to_datetime(df["date"]).dt.date
+            df["provisional"] = df["provisional"].astype(bool)
+            logger.info(f"Baseline cache hit: {len(df)} rows from {BASELINE_CACHE_PATH}")
+            return df
+        except Exception as e:
+            logger.warning(f"Could not load baseline cache: {e}")
+    return None
+
+
+def _save_baseline_cache(df: pd.DataFrame) -> None:
+    try:
+        BASELINE_CACHE_PATH.parent.mkdir(exist_ok=True)
+        df.to_csv(BASELINE_CACHE_PATH, index=False)
+        logger.info(f"Baseline cached to {BASELINE_CACHE_PATH} ({len(df)} rows)")
+    except Exception as e:
+        logger.warning(f"Could not save baseline cache: {e}")
+
+
 # ── Main run function ─────────────────────────────────────────────────────────
 def run(
     from_date: Optional[date] = None,
@@ -159,14 +185,17 @@ def run(
     def fetch_one(ext, f, t):
         return ext.fetch(f, t)
 
+    # Try to load baseline from cache first (avoids re-fetching 2019-2021 each run)
+    baseline_df = _load_baseline_cache()
+    baseline_needed = baseline_from < from_date and baseline_df is None
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
         # Recent period
         recent_futures = {
             pool.submit(fetch_one, ext, from_date, to_date): ext
             for ext in extractors
         }
-        # Baseline period (only if not overlapping)
-        baseline_needed = baseline_from < from_date
+        # Baseline period — only if cache miss and date ranges don't overlap
         if baseline_needed:
             baseline_futures = {
                 pool.submit(fetch_one, ext, baseline_from, baseline_to): ext
@@ -183,13 +212,22 @@ def run(
             except Exception as e:
                 logger.warning(f"{ext.source} timed out or failed: {e}")
 
+        baseline_parts = []
         for future, ext in baseline_futures.items():
             try:
                 df = future.result(timeout=120)
                 if not df.empty:
                     all_dfs.append(df)
+                    baseline_parts.append(df)
             except Exception as e:
                 logger.warning(f"{ext.source} baseline failed: {e}")
+
+        if baseline_parts:
+            _save_baseline_cache(pd.concat(baseline_parts, ignore_index=True))
+
+    if baseline_df is not None:
+        logger.info("Loaded baseline from cache (skipping re-fetch of 2019-2021).")
+        all_dfs.append(baseline_df)
 
     if not all_dfs:
         logger.error("No data retrieved from any extractor.")
