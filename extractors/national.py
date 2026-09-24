@@ -408,29 +408,55 @@ class SpainEnagasExtractor(BaseExtractor):
 
     def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
         records = []
-        # Walk backward from to_date, one window at a time
         anchor = to_date
         seen_anchors: set = set()
         while anchor >= from_date:
             if anchor in seen_anchors:
                 break
             seen_anchors.add(anchor)
-            params = {"date": anchor.strftime("%d/%m/%Y")}
-            try:
-                r = requests.get(self.API_URL, params=params, headers=HEADERS, timeout=30)
-                r.raise_for_status()
-                data = r.json()
-                for row in data.get("actual", []):
-                    fecha = row.get("fecha_demanda", "")[:10]
-                    demanda = row.get("demanda")
-                    if not fecha or demanda is None:
+
+            # Enagas sometimes returns 500/empty for very recent dates.
+            # Retry with progressively earlier anchors (up to 14 days back)
+            # so we don't skip an entire 80-day window.
+            effective_anchor = None
+            for offset in range(15):
+                attempt = anchor - timedelta(days=offset)
+                if attempt < from_date:
+                    break
+                params = {"date": attempt.strftime("%d/%m/%Y")}
+                try:
+                    r = requests.get(
+                        self.API_URL, params=params, headers=HEADERS, timeout=30
+                    )
+                    r.raise_for_status()
+                    data = r.json()
+                    rows = data.get("actual", [])
+                    if not rows:
+                        continue  # empty response — try earlier date
+                    for row in rows:
+                        fecha = row.get("fecha_demanda", "")[:10]
+                        demanda = row.get("demanda")
+                        if not fecha or demanda is None:
+                            continue
+                        try:
+                            records.append({"date": fecha, "twh": float(demanda) / 1000})
+                        except (TypeError, ValueError):
+                            continue
+                    effective_anchor = attempt
+                    break
+                except requests.exceptions.HTTPError as e:
+                    if r.status_code in (500, 502, 503, 504):
+                        logger.debug(f"Enagas {attempt}: {r.status_code}, trying earlier")
                         continue
-                    try:
-                        records.append({"date": fecha, "twh": float(demanda) / 1000})
-                    except (TypeError, ValueError):
-                        continue
-            except Exception as e:
-                logger.warning(f"Enagas {anchor}: {e}")
+                    logger.warning(f"Enagas {attempt}: {e}")
+                    break
+                except Exception as e:
+                    logger.warning(f"Enagas {attempt}: {e}")
+                    break
+
+            if effective_anchor is None:
+                logger.warning(f"Enagas: no data for window ending {anchor}")
+
             anchor = anchor - timedelta(days=self.WINDOW_DAYS)
 
         if not records:
