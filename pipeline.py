@@ -30,6 +30,7 @@ from extractors.national import (
     DenmarkEnergiDataExtractor,
     AustriaAGGMExtractor,
     EstoniaEleringExtractor,
+    LithuaniaAmberGridExtractor,
 )
 from extractors.entsog import ENTSOGDirectExtractor
 from extractors.flow_derived import FlowDerivedExtractor, FinlandLNGExtractor
@@ -67,7 +68,7 @@ def _build_extractors():
         # Flow-derived — zero domestic production
         FlowDerivedExtractor("SK"),
         FlowDerivedExtractor("LV"),
-        FlowDerivedExtractor("LT"),
+        LithuaniaAmberGridExtractor(),
         EstoniaEleringExtractor(),
         FlowDerivedExtractor("SE"),
         FinlandLNGExtractor(),
