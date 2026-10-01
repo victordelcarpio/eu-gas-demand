@@ -676,3 +676,75 @@ class EstoniaEleringExtractor(BaseExtractor):
         df = df.groupby("date", as_index=False)["kwh"].sum()
         df["twh"] = df["kwh"] / 1e9
         return df[["date", "twh"]]
+
+
+# ── Lithuania — Amber Grid ────────────────────────────────────────────────────
+
+class LithuaniaAmberGridExtractor(BaseExtractor):
+    """
+    Amber Grid (Lithuanian TSO) open data portal — domestic consumption.
+
+    Endpoint: /en/lietuvos-suvartojimo-duomenu-skaiciuokle/755/search
+    Returns JSON with daily kWh totals for:
+      - Transmitted to distribution systems
+      - Transmitted to directly connected consumers
+    We use the combined ltsuvartojimas_val field.
+
+    Data coverage starts ~Oct 2021. Validated against Eurostat IC_OBS at
+    -2% to -16% (own-use / losses gap, consistent directional offset).
+    """
+    country = "LT"
+    source  = "Amber Grid (Lithuanian TSO)"
+
+    API_URL = (
+        "https://ambergrid.lt/en/"
+        "lietuvos-suvartojimo-duomenu-skaiciuokle/755/search"
+    )
+    _HEADERS = {
+        **HEADERS,
+        "Referer": "https://ambergrid.lt/en/for-clients/open-data/650",
+    }
+
+    def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
+        # Chunk into monthly requests to stay within API limits
+        from calendar import monthrange
+        records = []
+        cur = from_date.replace(day=1)
+        while cur <= to_date:
+            last_day = monthrange(cur.year, cur.month)[1]
+            chunk_end = min(to_date, cur.replace(day=last_day))
+            params = {
+                "date_from": cur.isoformat(),
+                "date_to":   chunk_end.isoformat(),
+                "format":    "csv",
+                "services":  "ltsuvartojimas",
+            }
+            try:
+                r = requests.get(
+                    self.API_URL, params=params,
+                    headers=self._HEADERS, timeout=30,
+                )
+                r.raise_for_status()
+                for row in r.json().get("list", []):
+                    dt  = row.get("prsk_data_f")
+                    val = row.get("ltsuvartojimas_val")
+                    if dt and val is not None:
+                        records.append({
+                            "date": dt,
+                            "twh":  float(val) / 1e9,
+                        })
+            except Exception as e:
+                logger.warning(f"Amber Grid {cur.isoformat()}: {e}")
+            # Advance to next month
+            if cur.month == 12:
+                cur = cur.replace(year=cur.year + 1, month=1, day=1)
+            else:
+                cur = cur.replace(month=cur.month + 1, day=1)
+
+        if not records:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(records)
+        df["date"] = pd.to_datetime(df["date"]).dt.date
+        df = df[(df["date"] >= from_date) & (df["date"] <= to_date)]
+        return df.groupby("date", as_index=False)["twh"].sum()
