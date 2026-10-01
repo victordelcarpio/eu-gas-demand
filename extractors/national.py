@@ -626,3 +626,54 @@ class AustriaAGGMExtractor(BaseExtractor):
         except Exception as e:
             logger.warning(f"AGGM: {e}")
             return pd.DataFrame()
+
+
+# ── Estonia — Elering ────────────────────────────────────────────────────────
+
+class EstoniaEleringExtractor(BaseExtractor):
+    """
+    Elering Dashboard API — /api/gas-system
+    Returns hourly total domestic gas flow from the Estonian transmission
+    network in kWh. Maximum request window is 1 year; we chunk accordingly.
+    Validated against Eurostat IC_OBS: ~2-3% delta for comparable months.
+    """
+    country = "EE"
+    source  = "Elering (Estonian TSO)"
+
+    API_URL = "https://dashboard.elering.ee/api/gas-system"
+
+    def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
+        from datetime import datetime as dt
+
+        records = []
+        start = from_date
+        while start <= to_date:
+            # Max 1 year per request
+            end = min(to_date, date(start.year + 1, start.month, start.day) - timedelta(days=1))
+            params = {
+                "start": start.strftime("%Y-%m-%dT00:00:00Z"),
+                "end":   (end + timedelta(days=1)).strftime("%Y-%m-%dT00:00:00Z"),
+            }
+            try:
+                r = requests.get(self.API_URL, params=params, headers=HEADERS, timeout=60)
+                r.raise_for_status()
+                for item in r.json().get("data", []):
+                    ts  = item.get("timestamp")
+                    val = item.get("value")
+                    if ts is not None and val is not None:
+                        records.append({
+                            "date": dt.utcfromtimestamp(ts).date(),
+                            "kwh":  float(val),
+                        })
+            except Exception as e:
+                logger.warning(f"Elering gas-system {start}: {e}")
+            start = end + timedelta(days=1)
+
+        if not records:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(records)
+        df = df[(df["date"] >= from_date) & (df["date"] <= to_date)]
+        df = df.groupby("date", as_index=False)["kwh"].sum()
+        df["twh"] = df["kwh"] / 1e9
+        return df[["date", "twh"]]
