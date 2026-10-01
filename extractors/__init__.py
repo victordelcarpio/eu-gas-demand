@@ -8,6 +8,7 @@ from .national import (
     CzechOTEExtractor,
     DenmarkEnergiDataExtractor,
     AustriaAGGMExtractor,
+    EstoniaEleringExtractor,
 )
 from .entsog import ENTSOGDirectExtractor
 from .flow_derived import FlowDerivedExtractor, FinlandLNGExtractor
