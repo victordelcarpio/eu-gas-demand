@@ -13,5 +13,5 @@ from .national import (
     NetherlandsGTSExtractor,
     PortugalRENExtractor,
 )
-from .entsog import ENTSOGDirectExtractor
+from .entsog import ENTSOGDirectExtractor, ENTSOGPhysicalFlowExtractor
 from .flow_derived import FlowDerivedExtractor, FinlandLNGExtractor

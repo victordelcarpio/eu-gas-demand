@@ -34,7 +34,7 @@ from extractors.national import (
     NetherlandsGTSExtractor,
     PortugalRENExtractor,
 )
-from extractors.entsog import ENTSOGDirectExtractor
+from extractors.entsog import ENTSOGDirectExtractor, ENTSOGPhysicalFlowExtractor
 from extractors.flow_derived import FlowDerivedExtractor, FinlandLNGExtractor
 
 logging.basicConfig(
@@ -56,9 +56,12 @@ def _build_extractors():
         CzechOTEExtractor(),
         DenmarkEnergiDataExtractor(),
         AustriaAGGMExtractor(),
-        # Direct — ENTSOG aggregated consumption
+        # Direct — ENTSOG Physical Flow consumption points
         NetherlandsGTSExtractor(),
-        ENTSOGDirectExtractor("BE"),
+        ENTSOGPhysicalFlowExtractor("BE", [
+            "DIS-00191", "DIS-00192",            # Fluxys exit to distribution
+            "FNC-00033", "FNC-00034", "FNC-00035",  # large industrial / power
+        ]),
         ENTSOGDirectExtractor("PL"),
         ENTSOGDirectExtractor("HU"),
         FlowDerivedExtractor("RO"),
@@ -66,7 +69,8 @@ def _build_extractors():
         PortugalRENExtractor(),
         ENTSOGDirectExtractor("HR"),
         ENTSOGDirectExtractor("SI"),
-        ENTSOGDirectExtractor("BG"),
+        ENTSOGPhysicalFlowExtractor("BG", ["FNC-00207"],
+                                    history_from=date(2021, 10, 1)),
         # Flow-derived — zero domestic production
         FlowDerivedExtractor("SK"),
         FlowDerivedExtractor("LV"),
