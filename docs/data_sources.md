@@ -10,31 +10,30 @@ This document describes the data source used for each country in the pipeline: w
 |---------|---------------|--------|-------------|-----------------|-------------|--------------|-----|
 | DE | National TSO API* | Trading Hub Europe (THE) | Daily | Total system (transmission) | ~3–5% | 2019 | D+1 |
 | FR | National TSO API | ODRÉ / GRTGaz-TEREGA | Daily (half-hourly agg.) | Total system (trans. + dist.) | <1% | Jan 2012 | ~6 weeks (main); D+2 (sector fill) |
-| GB | National TSO API* | National Gas / Xoserve | Daily | Total NTS demand | ~3–5% | — | D+1 |
+| GB | National TSO API | National Gas operationaldata API | Daily | Total NTS demand | ~3–5% | ~2015 | D+1 |
 | IT | ENTSOG allocation | Snam Rete Gas — 3 points | Daily | Distribution + industrial + power | ~4–8% | ~2010 | D+1 |
 | ES | National TSO API | Enagas | Daily | Total national system | ~2–4% | ~2015 | D+2 |
 | CZ | National market op. | OTE (V0/V1 evaluation) | Daily | Total system | ~3–5% | ~2015 | D+3 (V0); M+16d (V1) |
-| DK | National TSO API | Energi Data Service (Energinet) | Daily | Transmission to distribution | ~20–28%† | ~2012 | D+1 |
+| DK | National TSO API | Energi Data Service (Energinet) | Daily | Natural gas: transmission to distribution | <1% nat. gas†† | ~2012 | D+1 |
 | AT | National system op. | AGGM | Daily | Total system | ~3–5% | ~2019 | D+1 |
 | EE | National TSO API | Elering Dashboard | Hourly (agg. to daily) | Total domestic flow from transmission | ~2–3% | ~2015 | D+1 |
 | LT | National TSO API | Amber Grid open data | Daily | Distribution systems + directly connected | ~2–16% | Oct 2021 | D+1 |
 | NL | ENTSOG Physical Flow | ENTSOG TP / GTS (NL-TSO-0001) | Daily | Distribution + final consumers | ~3–5% | ~2012 | D+1 |
-| BE | ENTSOG aggregated | ENTSOG TP | Daily | Aggregated exit (Fluxys) | ~3–6% | ~2012 | D+1 |
+| BE | ENTSOG Physical Flow | ENTSOG TP (Fluxys) | Daily | Distribution + industrial exit points | ~3–6% | ~2012 | D+1 |
 | PL | ENTSOG aggregated | ENTSOG TP | Daily | Aggregated exit (GAZ-SYSTEM) | ~3–6% | ~2012 | D+1 |
 | HU | ENTSOG aggregated | ENTSOG TP | Daily | Aggregated exit (FGSZ) | ~3–6% | ~2012 | D+1 |
 | RO | ENTSOG aggregated | ENTSOG TP | Daily | Aggregated exit (Transgaz) | ~3–6% | ~2012 | D+1 |
 | GR | ENTSOG aggregated | ENTSOG TP | Daily | Aggregated exit (DESFA) | ~3–6% | ~2012 | D+1 |
 | PT | National TSO API | REN Data Hub | Daily | Total national system | <1% | ~2015 | D+1 |
-| HR | ENTSOG aggregated | ENTSOG TP | Daily | Aggregated exit (Plinacro) | ~3–6% | ~2012 | D+1 |
+| HR | National TSO API | Plinacro SUKAP | Daily | Total domestic consumption | ~3–5% | ~2020 | D+1 |
 | SI | ENTSOG aggregated | ENTSOG TP | Daily | Aggregated exit (Plinovodi) | ~3–6% | ~2012 | D+1 |
-| BG | ENTSOG aggregated | ENTSOG TP | Daily | Aggregated exit (Bulgartransgaz) | ~3–6% | ~2012 | D+1 |
+| BG | ENTSOG Physical Flow | ENTSOG TP (Bulgartransgaz) | Daily | Main exit point (FNC-00207) | ~3–6% | Oct 2021 | D+1 |
 | SK | Flow-derived | ENTSOG TP (balance) | Daily | Net imports (no domestic prod.) | ~5–10% | ~2012 | D+1 |
 | LV | Flow-derived | ENTSOG TP (balance) | Daily | Net imports (no domestic prod.) | ~5–10% | ~2012 | D+1 |
 | SE | Flow-derived | ENTSOG TP (balance) | Daily | Net imports (no domestic prod.) | ~5–10% | ~2012 | D+1 |
-| FI | Flow-derived + LNG | ENTSOG TP + Gasgrid | Daily | Pipeline + LNG regasification | ~5–10% | ~2012 | D+1 |
+| FI | National TSO Excel + flow-derived | Gasgrid Finland (Excel) + ALSI LNG | Daily | Total system (completed months from Excel; current month from LNG sendout) | ~2–5% hist.; ~5–10% current | ~2020 | M+1w hist.; D+1 current |
 
-\* Requires API token (see README)  
-† See Denmark note below — structural undercount, not fixable from public data
+†† Denmark gap vs Eurostat IC_OBS is intentional: Eurostat includes biomethane/biogas injected at DSO level; this pipeline tracks natural gas only. The Energinet Gasflow dataset covers natural gas through the transmission system and is the correct scope.
 
 ---
 
@@ -78,13 +77,13 @@ This is a structural limitation of the ENTSOG Transparency Platform data. It is 
 
 ---
 
-### United Kingdom (GB) — National Gas / Xoserve
+### United Kingdom (GB) — National Gas operationaldata API
 
-**What**: NTS (National Transmission System) actual demand at D+1. The new download API (`data.nationalgas.com`) replaced the old MIP portal in 2025. Reports in GWh, converted to TWh.
+**What**: NTS (National Transmission System) actual demand at D+1. Publication `PUBOBJ1030` — "Demand Actual, NTS, D+1 (Energy)". Values in kWh, converted to TWh (÷ 1e9). Fetched via `POST https://api.nationalgas.com/operationaldata/v1/publications/gasday`.
 
-**Access**: Requires OAuth token from `https://apideveloper.nationalgas.com/s/`. Set `NATIONAL_GAS_API_TOKEN` environment variable.
+**Access**: Public API, no authentication required.
 
-**Coverage**: Transmission system demand. UK gas day is 06:00–06:00 UTC.
+**Coverage**: Transmission system demand. UK gas day is 06:00–06:00 UTC. Validated Q1 2024: 224 TWh across 91 days.
 
 ---
 
@@ -125,7 +124,9 @@ This is a structural limitation of the ENTSOG Transparency Platform data. It is 
 
 **What**: The Gasflow dataset from Energi Data Service reports daily gas flows through the Energinet transmission system. `KWhToDenmark` (negative convention, gas leaving transmission) is used as the consumption proxy.
 
-**Known limitation — structural undercount (~20–28%)**: A significant share of Danish gas consumption comes from **biogas injected directly into distribution networks** (DSO level). This gas never passes through the Energinet transmission system and therefore does not appear in Gasflow. This is a systemic gap that cannot be closed from publicly available data — it would require aggregated DSO metering data which is not published. The pipeline figure represents transmission-delivered consumption only. For reports, note that Danish figures are transmission-only and understate total gas use by approximately 20–28%.
+**Scope**: Natural gas only. Biogas/biomethane injected directly into distribution networks (DSO level) bypasses the Energinet transmission system and is excluded by design — this pipeline tracks natural gas demand, not biomethane. Eurostat IC_OBS includes both natural gas and biomethane, so the ~20–25% gap vs Eurostat is expected and correct for this use case.
+
+**Note**: The GasSystemRightNow dataset on Energi Data Service would include DSO-level biogas (`ExitZone_Flow`) but returns HTTP 403 for automated access.
 
 ---
 

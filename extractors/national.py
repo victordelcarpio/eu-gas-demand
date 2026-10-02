@@ -254,71 +254,72 @@ class FranceGRTGazExtractor(BaseExtractor):
 
 class UKNationalGasExtractor(BaseExtractor):
     """
-    National Gas (formerly National Grid Gas Transmission) daily demand data.
+    National Gas NTS actual demand via the public operationaldata API.
 
-    As of 2025, the MIP portal (mip-prd-web.azurewebsites.net) has been replaced
-    by a React SPA at data.nationalgas.com. The new download API
-    (/api/find-gas-data-download) requires OAuth credentials obtained from:
-        https://apideveloper.nationalgas.com/s/
+    Endpoint: POST https://api.nationalgas.com/operationaldata/v1/publications/gasday
+    Publication: PUBOBJ1030 — "Demand Actual, NTS, D+1 (Energy)"
+    Values in kWh; converted to TWh (÷ 1e9). No authentication required.
 
-    Set env var NATIONAL_GAS_API_TOKEN to a valid Bearer token to enable.
-    Without it this extractor returns empty.
+    Requests are batched in 365-day chunks to stay within API limits.
     """
-    country = "GB"
-    source  = "National Gas / Xoserve"
+    country  = "GB"
+    source   = "National Gas (NTS actual demand)"
+    API_URL  = "https://api.nationalgas.com/operationaldata/v1/publications/gasday"
+    PUB_ID   = "PUBOBJ1030"
+    CHUNK    = 365
 
-    DOWNLOAD_URL = "https://data.nationalgas.com/api/find-gas-data-download"
-
-    def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
-        import os
-        token = os.environ.get("NATIONAL_GAS_API_TOKEN", "").strip()
-        if not token:
-            logger.warning(
-                "UKNationalGasExtractor: NATIONAL_GAS_API_TOKEN not set. "
-                "The National Gas data portal now requires OAuth credentials. "
-                "Register at https://apideveloper.nationalgas.com/s/ to obtain "
-                "an API token, then set the NATIONAL_GAS_API_TOKEN env var."
-            )
-            return pd.DataFrame()
-
-        params = {
-            "dateFrom":    from_date.isoformat(),
-            "dateTo":      to_date.isoformat(),
-            "dateType":    "GASDAY",
-            "applicableFor": "Y",
-            "latestFlag":  "N",
-            "ids":         "PUBOBJ1030",  # Demand Actual, NTS, D+1 (Energy)
-            "type":        "csv",
-        }
-        auth_headers = {**HEADERS, "Authorization": f"Bearer {token}"}
+    def _fetch_chunk(self, from_date: date, to_date: date) -> list[dict]:
         try:
-            r = requests.get(
-                self.DOWNLOAD_URL, params=params, headers=auth_headers, timeout=30
+            r = requests.post(
+                self.API_URL,
+                json={
+                    "publicationIds": [self.PUB_ID],
+                    "fromDate": from_date.isoformat(),
+                    "toDate":   to_date.isoformat(),
+                },
+                headers={**HEADERS, "Content-Type": "application/json"},
+                timeout=30,
             )
             r.raise_for_status()
-
-            lines = r.text.strip().splitlines()
-            header_idx = 0
-            for i, line in enumerate(lines):
-                low = line.lower()
-                if "," in line and any(k in low for k in ("date", "value", "demand")):
-                    header_idx = i
-                    break
-            df = pd.read_csv(StringIO("\n".join(lines[header_idx:])))
-            df.columns = [c.strip().lower() for c in df.columns]
-
-            date_col  = next(c for c in df.columns if "date" in c)
-            value_col = next(
-                c for c in df.columns if "value" in c or "demand" in c or "quantity" in c
-            )
-            df["date"] = pd.to_datetime(df[date_col], dayfirst=True, errors="coerce").dt.date
-            df["twh"]  = pd.to_numeric(df[value_col], errors="coerce") / 1000
-            df = df.dropna(subset=["date", "twh"])
-            df = df[(df["date"] >= from_date) & (df["date"] <= to_date)]
-            return df.groupby("date", as_index=False)["twh"].sum()
+            pubs = r.json()
+            records = []
+            for pub in pubs:
+                for entry in pub.get("publications", []):
+                    d_str = entry.get("applicableFor", "")[:10]
+                    val   = entry.get("value")
+                    if not d_str or val is None:
+                        continue
+                    try:
+                        records.append({
+                            "date": date.fromisoformat(d_str),
+                            "twh":  float(val) / 1e9,
+                        })
+                    except (ValueError, TypeError):
+                        continue
+            return records
         except Exception as e:
-            logger.warning(f"National Gas API: {e}")
+            logger.warning(f"National Gas API {from_date}–{to_date}: {e}")
+            return []
+
+    def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
+        all_records = []
+        chunk_start = from_date
+        while chunk_start <= to_date:
+            chunk_end = min(
+                date(chunk_start.year + (1 if chunk_start.month == 12 else 0),
+                     (chunk_start.month % 12) + 1, 1) - timedelta(days=1),
+                to_date,
+            )
+            # simpler: just step by CHUNK days
+            chunk_end = min(chunk_start + timedelta(days=self.CHUNK - 1), to_date)
+            all_records.extend(self._fetch_chunk(chunk_start, chunk_end))
+            chunk_start = chunk_end + timedelta(days=1)
+
+        if not all_records:
             return pd.DataFrame()
+        df = pd.DataFrame(all_records)
+        df = df[(df["date"] >= from_date) & (df["date"] <= to_date)]
+        return df.groupby("date", as_index=False)["twh"].sum().sort_values("date").reset_index(drop=True)
 
 
 # ── Italy — Snam Rete Gas ─────────────────────────────────────────────────────
@@ -579,6 +580,11 @@ class DenmarkEnergiDataExtractor(BaseExtractor):
     Domestic consumption = KWhToDenmark (negative convention: gas leaving
     the transmission system into distribution networks is recorded as negative).
     We take its absolute value.
+
+    Known limitation (~20-25% structural undercount): biogas injected directly
+    into Evida distribution networks bypasses Energinet transmission metering
+    and is not included here. The GasSystemRightNow dataset would close this
+    gap but its API returns 403 for automated access.
     """
     country = "DK"
     source  = "Energi Data Service (Energinet)"
@@ -618,36 +624,48 @@ class DenmarkEnergiDataExtractor(BaseExtractor):
 
 class AustriaAGGMExtractor(BaseExtractor):
     """
-    AGGM (Austrian Gas Grid Management) publishes daily consumption data.
-    Bruegel uses the WIFO-aggregated CSV; we go direct to AGGM.
+    AGGM vis-service JSON API — ErmittelterEKVOesterreich time series.
+    Total determined consumption Austria, all consumer categories, in kWh/day.
+    Gas day boundary: 06:00 CET. History from 2019. Lag ~1 day. No auth required.
     """
     country = "AT"
     source  = "AGGM (Austrian Gas Grid Management)"
 
-    # AGGM publishes consumption via their transparency data portal
-    API_URL = "https://www.aggm.at/aggm/gst/transparency/gasday"
+    API_URL    = "https://platform.aggm.at/vis-service/api/ts/values"
+    TIMESERIES = "ErmittelterEKVOesterreich"
 
     def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
-        params = {
-            "dateFrom": from_date.strftime("%Y-%m-%d"),
-            "dateTo":   to_date.strftime("%Y-%m-%d"),
-            "type":     "consumption",
-            "format":   "json",
+        payload = {
+            "rangeType":  "individual",
+            "from":       f"{from_date.isoformat()}T06:00:00",
+            "to":         f"{(to_date + timedelta(days=1)).isoformat()}T06:00:00",
+            "granularity": "Day",
+            "timeseries": [self.TIMESERIES],
         }
         try:
-            r = requests.get(self.API_URL, params=params, headers=HEADERS, timeout=30)
+            r = requests.post(
+                self.API_URL, json=payload, headers=HEADERS, timeout=60
+            )
             r.raise_for_status()
-            data = r.json()
+            chart = (
+                r.json()
+                .get("timeSeriesData", {})
+                .get("chartData", [{}])[0]
+                .get("dataSet", [])
+            )
             records = []
-            for row in data:
-                records.append({
-                    "date": pd.to_datetime(row.get("gasDay", "")).date(),
-                    "twh":  float(row.get("value", 0)) / 1_000_000,  # MWh → TWh
-                })
+            for point in chart:
+                x = point.get("x")
+                y = point.get("y")
+                if x is None or y is None:
+                    continue
+                d = pd.Timestamp(x, unit="ms", tz="UTC").tz_convert("Europe/Vienna").date()
+                records.append({"date": d, "twh": float(y) / 1e9})
+            if not records:
+                return pd.DataFrame()
             df = pd.DataFrame(records)
-            if df.empty:
-                return df
-            return df[(df["date"] >= from_date) & (df["date"] <= to_date)]
+            df = df[(df["date"] >= from_date) & (df["date"] <= to_date)]
+            return df.sort_values("date").reset_index(drop=True)
         except Exception as e:
             logger.warning(f"AGGM: {e}")
             return pd.DataFrame()
@@ -903,3 +921,131 @@ class PortugalRENExtractor(BaseExtractor):
         df = pd.DataFrame(records)
         df = df.sort_values("date").reset_index(drop=True)
         return df
+
+
+# ── Croatia — Plinacro SUKAP ─────────────────────────────────────────────────
+
+class CroatiaPlinacroExtractor(BaseExtractor):
+    """
+    Croatia — total daily consumption from Plinacro SUKAP portal.
+
+    Endpoint: POST https://www.sukap.plinacro.hr/pub/consumption/search
+    Body: {"gasDay": "YYYY-MM-DDT00:00:00"}
+
+    Returns 24 hourly records. The last record's cumulativeCapacity is the
+    daily total in kWh (gas day 07:15 – 06:15 CET). Fetched in parallel.
+    """
+    country  = "HR"
+    source   = "Plinacro SUKAP"
+    API_URL  = "https://www.sukap.plinacro.hr/pub/consumption/search"
+
+    def _fetch_day(self, d: date):
+        try:
+            r = requests.post(
+                self.API_URL,
+                json={"gasDay": f"{d.isoformat()}T00:00:00"},
+                headers={**HEADERS, "Content-Type": "application/json"},
+                timeout=30,
+            )
+            r.raise_for_status()
+            values = r.json().get("data", {}).get("values", [])
+            if not values:
+                return None
+            last = max(values, key=lambda v: v.get("gasHour", -1))
+            cumulative = last.get("cumulativeCapacity")
+            if cumulative is None or cumulative <= 0:
+                return None
+            return {"date": d, "twh": float(cumulative) / 1e9}
+        except Exception as e:
+            logger.warning(f"Plinacro HR {d}: {e}")
+            return None
+
+    def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
+        all_dates = []
+        d = from_date
+        while d <= to_date:
+            all_dates.append(d)
+            d += timedelta(days=1)
+
+        records = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            futures = [pool.submit(self._fetch_day, day) for day in all_dates]
+            for future in concurrent.futures.as_completed(futures):
+                result = future.result()
+                if result is not None:
+                    records.append(result)
+
+        if not records:
+            return pd.DataFrame()
+        df = pd.DataFrame(records)
+        return df.sort_values("date").reset_index(drop=True)
+
+
+# ── Finland — Gasgrid transparency Excel ─────────────────────────────────────
+
+class FinlandGasgridExtractor(BaseExtractor):
+    """
+    Finland — daily gas consumption from Gasgrid's published Excel file.
+
+    Gasgrid publishes a monthly-updated Excel on their transparency page:
+    https://gasgrid.fi/en/gas-business/transparency-and-market-information/
+
+    The file covers completed months only (typically updated ~1 week after
+    month end). For the current incomplete month, the pipeline falls back to
+    FinlandLNGExtractor (flow-derived) via the method-rank deduplication in
+    pipeline.py.
+
+    Units in the Excel: GWh/day (GCV basis). We convert to TWh (÷ 1000).
+    """
+    country    = "FI"
+    source     = "Gasgrid Finland"
+    method     = "direct"
+    INDEX_URL  = "https://gasgrid.fi/en/gas-business/transparency-and-market-information/"
+
+    def _find_excel_url(self) -> str | None:
+        try:
+            r = requests.get(self.INDEX_URL, headers=HEADERS, timeout=30)
+            r.raise_for_status()
+            import re
+            matches = re.findall(
+                r'https://gasgrid\.fi/wp-content/uploads/[^"\']+Gas-consumption-in-Finland[^"\']+\.xlsx',
+                r.text,
+            )
+            return matches[0] if matches else None
+        except Exception as e:
+            logger.warning(f"Gasgrid index fetch: {e}")
+            return None
+
+    def _parse_excel(self, content: bytes, from_date: date, to_date: date) -> pd.DataFrame:
+        xls = pd.ExcelFile(BytesIO(content))
+        parts = []
+        for sheet in xls.sheet_names:
+            try:
+                df = xls.parse(sheet, header=None)
+                # col 2 = date, col 3 = GWh/day
+                sub = df[[2, 3]].dropna(subset=[2, 3]).copy()
+                sub.columns = ["date", "twh"]
+                sub["date"] = pd.to_datetime(sub["date"], errors="coerce").dt.date
+                sub["twh"]  = pd.to_numeric(sub["twh"], errors="coerce") / 1000  # GWh → TWh
+                sub = sub.dropna()
+                parts.append(sub)
+            except Exception:
+                continue
+        if not parts:
+            return pd.DataFrame()
+        combined = pd.concat(parts, ignore_index=True)
+        combined = combined[(combined["date"] >= from_date) & (combined["date"] <= to_date)]
+        return combined.sort_values("date").reset_index(drop=True)
+
+    def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
+        url = self._find_excel_url()
+        if not url:
+            logger.warning("Gasgrid: could not locate Excel URL on transparency page")
+            return pd.DataFrame()
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=60)
+            r.raise_for_status()
+            return self._parse_excel(r.content, from_date, to_date)
+        except Exception as e:
+            logger.warning(f"Gasgrid Excel download: {e}")
+            return pd.DataFrame()

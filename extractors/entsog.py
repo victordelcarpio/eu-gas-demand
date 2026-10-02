@@ -189,12 +189,8 @@ def fetch_border_flows(
 
 class ENTSOGDirectExtractor(BaseExtractor):
     """
-    Placeholder extractor for countries that previously used the /AggregatedData
-    endpoint (NL, BE, PL, HU, RO, GR, PT, HR, SI, BG).
-
-    The /AggregatedData endpoint no longer returns data. This class is retained
-    for registry compatibility but returns empty DataFrames until a replacement
-    source is wired up per country.
+    Placeholder for countries not yet wired up with specific point keys.
+    Returns empty DataFrames — used only as a registry stub.
     """
     method = "direct"
 
@@ -204,7 +200,42 @@ class ENTSOGDirectExtractor(BaseExtractor):
 
     def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
         logger.warning(
-            f"ENTSOG AggregatedData endpoint is not functional for {self.country}. "
-            "No data returned. Wire up a national TSO source for this country."
+            f"ENTSOG: no Physical Flow points configured for {self.country}. "
+            "No data returned."
         )
         return pd.DataFrame()
+
+
+class ENTSOGPhysicalFlowExtractor(BaseExtractor):
+    """
+    Fetch ENTSOG Physical Flow data for a set of named consumption point keys.
+
+    Each point key maps to a specific exit point on the TSO transmission
+    network — e.g. a distribution-system delivery point (DIS-xxxxx) or a
+    directly-connected final consumer / industrial point (FNC-xxxxx).
+    All are queried with direction='exit' (gas leaving the transmission system).
+
+    This replaces the defunct /AggregatedData endpoint for countries where we
+    know the relevant set of consumption exit points.
+    """
+    method = "direct"
+
+    def __init__(self, country: str, point_keys: list[str], history_from: date | None = None):
+        self.country      = country
+        self.point_keys   = point_keys
+        self.history_from = history_from
+        self.source       = f"ENTSOG Physical Flow ({country})"
+
+    def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
+        effective_from = from_date
+        if self.history_from and from_date < self.history_from:
+            effective_from = self.history_from
+
+        if effective_from > to_date:
+            return pd.DataFrame()
+
+        df = _fetch_point_flows(self.point_keys, "exit", effective_from, to_date)
+        if df.empty:
+            return df
+        df = df[(df["date"] >= effective_from) & (df["date"] <= to_date)]
+        return df.sort_values("date").reset_index(drop=True)
