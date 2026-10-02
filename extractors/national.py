@@ -13,6 +13,7 @@ Austria  : AGGM via WIFO CSV
 
 from datetime import date, timedelta
 from io import BytesIO, StringIO
+import time
 import zipfile
 import pandas as pd
 import requests
@@ -352,27 +353,42 @@ class ItalySnamExtractor(BaseExtractor):
             "limit":      10000,
             "format":     "json",
         }
-        try:
-            r = requests.get(
-                f"{self.ENTSOG_BASE}/operationalData",
-                params=params, headers=HEADERS, timeout=60,
-            )
-            r.raise_for_status()
-            rows = r.json().get("operationalData", [])
-            records = []
-            for row in rows:
-                val = row.get("value")
-                period = row.get("periodFrom", "")[:10]
-                if val is None or val == "" or not period:
-                    continue
-                records.append({"date": period, "twh": float(val) / 1e9})
-            df = pd.DataFrame(records)
-            if not df.empty:
-                df["date"] = pd.to_datetime(df["date"]).dt.date
-            return df
-        except Exception as e:
-            logger.warning(f"ENTSOG Italy ({point_key}): {e}")
-            return pd.DataFrame()
+        for attempt in range(3):
+            try:
+                r = requests.get(
+                    f"{self.ENTSOG_BASE}/operationalData",
+                    params=params, headers=HEADERS,
+                    timeout=90 + attempt * 30,   # 90s, 120s, 150s
+                )
+                r.raise_for_status()
+                rows = r.json().get("operationalData", [])
+                records = []
+                for row in rows:
+                    val = row.get("value")
+                    period = row.get("periodFrom", "")[:10]
+                    if val is None or val == "" or not period:
+                        continue
+                    records.append({"date": period, "twh": float(val) / 1e9})
+                df = pd.DataFrame(records)
+                if not df.empty:
+                    df["date"] = pd.to_datetime(df["date"]).dt.date
+                return df
+            except requests.exceptions.Timeout:
+                if attempt < 2:
+                    wait = (attempt + 1) * 15
+                    logger.warning(
+                        f"ENTSOG Italy ({point_key}): timeout, "
+                        f"retry {attempt + 1}/3 in {wait}s"
+                    )
+                    time.sleep(wait)
+                else:
+                    logger.warning(
+                        f"ENTSOG Italy ({point_key}): timeout after 3 attempts, skipping"
+                    )
+            except Exception as e:
+                logger.warning(f"ENTSOG Italy ({point_key}): {e}")
+                break
+        return pd.DataFrame()
 
     def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
         dfs = [self._fetch_point(k, from_date, to_date) for k in self.POINT_KEYS]
@@ -403,10 +419,14 @@ class SpainEnagasExtractor(BaseExtractor):
         "/energy-data/demanda/historico/jcr:content/responsiveGrid"
         "/container_copy_19796/realdemand_copy_copy.realdemand.json"
     )
-    WINDOW_DAYS = 80
+    WINDOW_DAYS = 60   # 60-day step + up to 14-day retry = 74 days covered per window,
+                       # ensuring no gap even in the worst case (next window ≥ 60 days back).
 
     def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
-        records = []
+        # Use a dict keyed by date string to prevent double-counting when
+        # overlapping windows return the same date (last write wins, which is fine
+        # since Enagas returns the same value for a given date regardless of anchor).
+        records: dict[str, float] = {}
         anchor = to_date
         seen_anchors: set = set()
         while anchor >= from_date:
@@ -415,8 +435,7 @@ class SpainEnagasExtractor(BaseExtractor):
             seen_anchors.add(anchor)
 
             # Enagas sometimes returns 500/empty for very recent dates.
-            # Retry with progressively earlier anchors (up to 14 days back)
-            # so we don't skip an entire 80-day window.
+            # Retry with progressively earlier anchors (up to 14 days back).
             effective_anchor = None
             for offset in range(15):
                 attempt = anchor - timedelta(days=offset)
@@ -425,7 +444,7 @@ class SpainEnagasExtractor(BaseExtractor):
                 params = {"date": attempt.strftime("%d/%m/%Y")}
                 try:
                     r = requests.get(
-                        self.API_URL, params=params, headers=HEADERS, timeout=30
+                        self.API_URL, params=params, headers=HEADERS, timeout=60
                     )
                     r.raise_for_status()
                     data = r.json()
@@ -438,11 +457,15 @@ class SpainEnagasExtractor(BaseExtractor):
                         if not fecha or demanda is None:
                             continue
                         try:
-                            records.append({"date": fecha, "twh": float(demanda) / 1000})
+                            records[fecha] = float(demanda) / 1000
                         except (TypeError, ValueError):
                             continue
                     effective_anchor = attempt
                     break
+                except requests.exceptions.Timeout:
+                    logger.debug(f"Enagas {attempt}: timeout, trying earlier anchor")
+                    time.sleep(2)
+                    continue
                 except requests.exceptions.HTTPError as e:
                     if r.status_code in (500, 502, 503, 504):
                         logger.debug(f"Enagas {attempt}: {r.status_code}, trying earlier")
@@ -461,10 +484,12 @@ class SpainEnagasExtractor(BaseExtractor):
         if not records:
             return pd.DataFrame()
 
-        df = pd.DataFrame(records)
+        df = pd.DataFrame(
+            [{"date": d, "twh": v} for d, v in records.items()]
+        )
         df["date"] = pd.to_datetime(df["date"]).dt.date
         df = df[(df["date"] >= from_date) & (df["date"] <= to_date)]
-        return df.groupby("date", as_index=False)["twh"].sum()
+        return df.sort_values("date").reset_index(drop=True)
 
 
 # ── Czech Republic — OTE ──────────────────────────────────────────────────────
