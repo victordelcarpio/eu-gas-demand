@@ -32,6 +32,7 @@ from extractors.national import (
     EstoniaEleringExtractor,
     LithuaniaAmberGridExtractor,
     NetherlandsGTSExtractor,
+    PortugalRENExtractor,
 )
 from extractors.entsog import ENTSOGDirectExtractor
 from extractors.flow_derived import FlowDerivedExtractor, FinlandLNGExtractor
@@ -62,7 +63,7 @@ def _build_extractors():
         ENTSOGDirectExtractor("HU"),
         ENTSOGDirectExtractor("RO"),
         ENTSOGDirectExtractor("GR"),
-        ENTSOGDirectExtractor("PT"),
+        PortugalRENExtractor(),
         ENTSOGDirectExtractor("HR"),
         ENTSOGDirectExtractor("SI"),
         ENTSOGDirectExtractor("BG"),
