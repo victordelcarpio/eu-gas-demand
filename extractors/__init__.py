@@ -13,6 +13,7 @@ from .national import (
     NetherlandsGTSExtractor,
     PortugalRENExtractor,
     CroatiaPlinacroExtractor,
+    FinlandGasgridExtractor,
 )
 from .entsog import ENTSOGDirectExtractor, ENTSOGPhysicalFlowExtractor
 from .flow_derived import FlowDerivedExtractor, FinlandLNGExtractor

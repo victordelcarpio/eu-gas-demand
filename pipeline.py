@@ -34,6 +34,7 @@ from extractors.national import (
     NetherlandsGTSExtractor,
     PortugalRENExtractor,
     CroatiaPlinacroExtractor,
+    FinlandGasgridExtractor,
 )
 from extractors.entsog import ENTSOGDirectExtractor, ENTSOGPhysicalFlowExtractor
 from extractors.flow_derived import FlowDerivedExtractor, FinlandLNGExtractor
@@ -78,7 +79,8 @@ def _build_extractors():
         LithuaniaAmberGridExtractor(),
         EstoniaEleringExtractor(),
         FlowDerivedExtractor("SE"),
-        FinlandLNGExtractor(),
+        FinlandGasgridExtractor(),   # direct (Excel); falls back to LNG below
+        FinlandLNGExtractor(),       # flow-derived fallback for current month
     ]
 
 

@@ -978,3 +978,73 @@ class CroatiaPlinacroExtractor(BaseExtractor):
             return pd.DataFrame()
         df = pd.DataFrame(records)
         return df.sort_values("date").reset_index(drop=True)
+
+
+# ── Finland — Gasgrid transparency Excel ─────────────────────────────────────
+
+class FinlandGasgridExtractor(BaseExtractor):
+    """
+    Finland — daily gas consumption from Gasgrid's published Excel file.
+
+    Gasgrid publishes a monthly-updated Excel on their transparency page:
+    https://gasgrid.fi/en/gas-business/transparency-and-market-information/
+
+    The file covers completed months only (typically updated ~1 week after
+    month end). For the current incomplete month, the pipeline falls back to
+    FinlandLNGExtractor (flow-derived) via the method-rank deduplication in
+    pipeline.py.
+
+    Units in the Excel: GWh/day (GCV basis). We convert to TWh (÷ 1000).
+    """
+    country    = "FI"
+    source     = "Gasgrid Finland"
+    method     = "direct"
+    INDEX_URL  = "https://gasgrid.fi/en/gas-business/transparency-and-market-information/"
+
+    def _find_excel_url(self) -> str | None:
+        try:
+            r = requests.get(self.INDEX_URL, headers=HEADERS, timeout=30)
+            r.raise_for_status()
+            import re
+            matches = re.findall(
+                r'https://gasgrid\.fi/wp-content/uploads/[^"\']+Gas-consumption-in-Finland[^"\']+\.xlsx',
+                r.text,
+            )
+            return matches[0] if matches else None
+        except Exception as e:
+            logger.warning(f"Gasgrid index fetch: {e}")
+            return None
+
+    def _parse_excel(self, content: bytes, from_date: date, to_date: date) -> pd.DataFrame:
+        xls = pd.ExcelFile(BytesIO(content))
+        parts = []
+        for sheet in xls.sheet_names:
+            try:
+                df = xls.parse(sheet, header=None)
+                # col 2 = date, col 3 = GWh/day
+                sub = df[[2, 3]].dropna(subset=[2, 3]).copy()
+                sub.columns = ["date", "twh"]
+                sub["date"] = pd.to_datetime(sub["date"], errors="coerce").dt.date
+                sub["twh"]  = pd.to_numeric(sub["twh"], errors="coerce") / 1000  # GWh → TWh
+                sub = sub.dropna()
+                parts.append(sub)
+            except Exception:
+                continue
+        if not parts:
+            return pd.DataFrame()
+        combined = pd.concat(parts, ignore_index=True)
+        combined = combined[(combined["date"] >= from_date) & (combined["date"] <= to_date)]
+        return combined.sort_values("date").reset_index(drop=True)
+
+    def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
+        url = self._find_excel_url()
+        if not url:
+            logger.warning("Gasgrid: could not locate Excel URL on transparency page")
+            return pd.DataFrame()
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=60)
+            r.raise_for_status()
+            return self._parse_excel(r.content, from_date, to_date)
+        except Exception as e:
+            logger.warning(f"Gasgrid Excel download: {e}")
+            return pd.DataFrame()
