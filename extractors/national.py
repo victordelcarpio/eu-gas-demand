@@ -498,76 +498,19 @@ class SpainEnagasExtractor(BaseExtractor):
 
 class CzechOTEExtractor(BaseExtractor):
     """
-    OTE (Czech gas and electricity market operator) publishes daily
-    gas evaluations as ZIP files containing CSV data.
-
-    V0 evaluation: published D+3, provisional
-    V1 evaluation: published 16th of following month, more final
-
-    Days are fetched concurrently (up to 16 threads) to keep runtime
-    manageable over multi-year ranges. Each thread downloads one day's ZIP.
+    Stub — not used. OTE's old ZIP URL (/cs/statistika/plynovy-trh) was removed
+    when the site restructured in late 2024. The replacement aggregated imbalance
+    Excel reports "Off-take from System Total Volume" which includes transit
+    flows through CZ to neighbouring countries — NOT domestic consumption only.
+    Czech consumption is sourced from ENTSOG Physical Flow (DIS-00208 + FNC-00215)
+    registered directly in pipeline.py instead.
     """
     country = "CZ"
     source  = "OTE (Czech gas market operator)"
 
-    BASE_URL = "https://www.ote-cr.cz/cs/statistika/plynovy-trh"
-    MAX_WORKERS = 16
-
     def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
-        import concurrent.futures as cf
-
-        days = [
-            from_date + timedelta(days=i)
-            for i in range((to_date - from_date).days + 1)
-        ]
-
-        records = []
-        with cf.ThreadPoolExecutor(max_workers=self.MAX_WORKERS) as pool:
-            results = {pool.submit(self._fetch_day, d): d for d in days}
-            for future, d in results.items():
-                try:
-                    twh = future.result(timeout=30)
-                    if twh is not None:
-                        records.append({"date": d, "twh": twh})
-                except Exception as e:
-                    logger.debug(f"OTE {d}: {e}")
-
-        return pd.DataFrame(records) if records else pd.DataFrame()
-
-    def _fetch_day(self, day: date) -> float | None:
-        """Try V1 first (more accurate), fall back to V0."""
-        for version in ["V1", "V0"]:
-            url = (
-                f"{self.BASE_URL}/{version}/"
-                f"{version}_{day.strftime('%Y%m%d')}.zip"
-            )
-            try:
-                r = requests.get(url, headers=HEADERS, timeout=20)
-                if r.status_code == 404:
-                    continue
-                r.raise_for_status()
-                with zipfile.ZipFile(BytesIO(r.content)) as z:
-                    csv_name = next(
-                        (n for n in z.namelist() if n.endswith(".csv")), None
-                    )
-                    if not csv_name:
-                        continue
-                    with z.open(csv_name) as f:
-                        df = pd.read_csv(f, sep=";", decimal=",",
-                                         encoding="utf-8-sig", header=0)
-                        val_col = next(
-                            (c for c in df.columns
-                             if "spotřeba" in c.lower() or "consumption" in c.lower()
-                             or "celkem" in c.lower() or "spot" in c.lower()),
-                            None
-                        )
-                        if val_col is None:
-                            continue
-                        total_mwh = pd.to_numeric(df[val_col], errors="coerce").sum()
-                        return float(total_mwh) / 1_000_000  # MWh → TWh
-            except Exception as e:
-                logger.debug(f"OTE {version} {day}: {e}")
-        return None
+        logger.debug("CzechOTEExtractor: stub — CZ data comes from ENTSOG Physical Flow")
+        return pd.DataFrame()
 
 
 # ── Denmark — Energi Data Service ────────────────────────────────────────────

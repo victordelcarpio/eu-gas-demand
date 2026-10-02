@@ -13,7 +13,7 @@ This document describes the data source used for each country in the pipeline: w
 | GB | National TSO API | National Gas operationaldata API | Daily | Total NTS demand | ~3–5% | ~2015 | D+1 |
 | IT | ENTSOG allocation | Snam Rete Gas — 3 points | Daily | Distribution + industrial + power | ~4–8% | ~2010 | D+1 |
 | ES | National TSO API | Enagas | Daily | Total national system | ~2–4% | ~2015 | D+2 |
-| CZ | National market op. | OTE (V0/V1 evaluation) | Daily | Total system | ~3–5% | ~2015 | D+3 (V0); M+16d (V1) |
+| CZ | ENTSOG Physical Flow | ENTSOG TP (NET4GAS) | Daily | Distribution + final consumers | ~5–10% | Jan 2025 | D+1 |
 | DK | National TSO API | Energi Data Service (Energinet) | Daily | Natural gas: transmission to distribution | <1% nat. gas†† | ~2012 | D+1 |
 | AT | National system op. | AGGM | Daily | Total system | ~3–5% | ~2019 | D+1 |
 | EE | National TSO API | Elering Dashboard | Hourly (agg. to daily) | Total domestic flow from transmission | ~2–3% | ~2015 | D+1 |
@@ -112,11 +112,17 @@ This is a structural limitation of the ENTSOG Transparency Platform data. It is 
 
 ---
 
-### Czech Republic (CZ) — OTE
+### Czech Republic (CZ) — ENTSOG Physical Flow (NET4GAS)
 
-**What**: OTE (Czech gas and electricity market operator) publishes daily ZIP files with gas evaluation data. V0 evaluation is published D+3 (provisional); V1 is published the 16th of the following month (more final). The extractor tries V1 first, falls back to V0.
+**What**: NET4GAS (Czech TSO, `CZ-TSO-0001`) publishes daily Physical Flow data on ENTSOG Transparency Platform via two aggregated exit points:
+- `DIS-00208` — Aggregated Distribution (CZ): gas delivered from transmission to distribution networks
+- `FNC-00215` — Aggregated Final Consumers (CZ): large industrial consumers directly connected to transmission
 
-**Coverage**: Total national system consumption. Daily ZIP per gas day.
+**History**: Available from January 2025 on ENTSOG TP. No pre-2025 data is recoverable: the old OTE ZIP URL was removed when OTE restructured their site in late 2024, and OTE's replacement aggregated imbalance Excel reports total system off-take (including cross-border transit), not domestic consumption.
+
+**Coverage**: Transmission allocation only. Annual 2025 total ~77.6 TWh vs Eurostat IC_OBS ~85 TWh (~8% gap — normal for ENTSOG allocation data, reflecting transmission own-use and unmetered small consumers).
+
+**Note**: CZ is a major transit country; off-take from the system includes export flows. The ENTSOG DIS/FNC points capture domestic consumption only, not transit.
 
 ---
 
