@@ -61,7 +61,7 @@ def _build_extractors():
         ENTSOGDirectExtractor("BE"),
         ENTSOGDirectExtractor("PL"),
         ENTSOGDirectExtractor("HU"),
-        ENTSOGDirectExtractor("RO"),
+        FlowDerivedExtractor("RO"),
         ENTSOGDirectExtractor("GR"),
         PortugalRENExtractor(),
         ENTSOGDirectExtractor("HR"),

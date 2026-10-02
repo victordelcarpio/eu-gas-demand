@@ -579,6 +579,11 @@ class DenmarkEnergiDataExtractor(BaseExtractor):
     Domestic consumption = KWhToDenmark (negative convention: gas leaving
     the transmission system into distribution networks is recorded as negative).
     We take its absolute value.
+
+    Known limitation (~20-25% structural undercount): biogas injected directly
+    into Evida distribution networks bypasses Energinet transmission metering
+    and is not included here. The GasSystemRightNow dataset would close this
+    gap but its API returns 403 for automated access.
     """
     country = "DK"
     source  = "Energi Data Service (Energinet)"
@@ -618,36 +623,48 @@ class DenmarkEnergiDataExtractor(BaseExtractor):
 
 class AustriaAGGMExtractor(BaseExtractor):
     """
-    AGGM (Austrian Gas Grid Management) publishes daily consumption data.
-    Bruegel uses the WIFO-aggregated CSV; we go direct to AGGM.
+    AGGM vis-service JSON API — ErmittelterEKVOesterreich time series.
+    Total determined consumption Austria, all consumer categories, in kWh/day.
+    Gas day boundary: 06:00 CET. History from 2019. Lag ~1 day. No auth required.
     """
     country = "AT"
     source  = "AGGM (Austrian Gas Grid Management)"
 
-    # AGGM publishes consumption via their transparency data portal
-    API_URL = "https://www.aggm.at/aggm/gst/transparency/gasday"
+    API_URL    = "https://platform.aggm.at/vis-service/api/ts/values"
+    TIMESERIES = "ErmittelterEKVOesterreich"
 
     def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
-        params = {
-            "dateFrom": from_date.strftime("%Y-%m-%d"),
-            "dateTo":   to_date.strftime("%Y-%m-%d"),
-            "type":     "consumption",
-            "format":   "json",
+        payload = {
+            "rangeType":  "individual",
+            "from":       f"{from_date.isoformat()}T06:00:00",
+            "to":         f"{(to_date + timedelta(days=1)).isoformat()}T06:00:00",
+            "granularity": "Day",
+            "timeseries": [self.TIMESERIES],
         }
         try:
-            r = requests.get(self.API_URL, params=params, headers=HEADERS, timeout=30)
+            r = requests.post(
+                self.API_URL, json=payload, headers=HEADERS, timeout=60
+            )
             r.raise_for_status()
-            data = r.json()
+            chart = (
+                r.json()
+                .get("timeSeriesData", {})
+                .get("chartData", [{}])[0]
+                .get("dataSet", [])
+            )
             records = []
-            for row in data:
-                records.append({
-                    "date": pd.to_datetime(row.get("gasDay", "")).date(),
-                    "twh":  float(row.get("value", 0)) / 1_000_000,  # MWh → TWh
-                })
+            for point in chart:
+                x = point.get("x")
+                y = point.get("y")
+                if x is None or y is None:
+                    continue
+                d = pd.Timestamp(x, unit="ms", tz="UTC").tz_convert("Europe/Vienna").date()
+                records.append({"date": d, "twh": float(y) / 1e9})
+            if not records:
+                return pd.DataFrame()
             df = pd.DataFrame(records)
-            if df.empty:
-                return df
-            return df[(df["date"] >= from_date) & (df["date"] <= to_date)]
+            df = df[(df["date"] >= from_date) & (df["date"] <= to_date)]
+            return df.sort_values("date").reset_index(drop=True)
         except Exception as e:
             logger.warning(f"AGGM: {e}")
             return pd.DataFrame()

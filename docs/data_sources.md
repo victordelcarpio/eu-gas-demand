@@ -14,7 +14,7 @@ This document describes the data source used for each country in the pipeline: w
 | IT | ENTSOG allocation | Snam Rete Gas — 3 points | Daily | Distribution + industrial + power | ~4–8% | ~2010 | D+1 |
 | ES | National TSO API | Enagas | Daily | Total national system | ~2–4% | ~2015 | D+2 |
 | CZ | National market op. | OTE (V0/V1 evaluation) | Daily | Total system | ~3–5% | ~2015 | D+3 (V0); M+16d (V1) |
-| DK | National TSO API | Energi Data Service (Energinet) | Daily | Transmission to distribution | ~20–28%† | ~2012 | D+1 |
+| DK | National TSO API | Energi Data Service (Energinet) | Daily | Natural gas: transmission to distribution | <1% nat. gas†† | ~2012 | D+1 |
 | AT | National system op. | AGGM | Daily | Total system | ~3–5% | ~2019 | D+1 |
 | EE | National TSO API | Elering Dashboard | Hourly (agg. to daily) | Total domestic flow from transmission | ~2–3% | ~2015 | D+1 |
 | LT | National TSO API | Amber Grid open data | Daily | Distribution systems + directly connected | ~2–16% | Oct 2021 | D+1 |
@@ -34,7 +34,7 @@ This document describes the data source used for each country in the pipeline: w
 | FI | Flow-derived + LNG | ENTSOG TP + Gasgrid | Daily | Pipeline + LNG regasification | ~5–10% | ~2012 | D+1 |
 
 \* Requires API token (see README)  
-† See Denmark note below — structural undercount, not fixable from public data
+†† Denmark gap vs Eurostat IC_OBS is intentional: Eurostat includes biomethane/biogas injected at DSO level; this pipeline tracks natural gas only. The Energinet Gasflow dataset covers natural gas through the transmission system and is the correct scope.
 
 ---
 
@@ -125,7 +125,9 @@ This is a structural limitation of the ENTSOG Transparency Platform data. It is 
 
 **What**: The Gasflow dataset from Energi Data Service reports daily gas flows through the Energinet transmission system. `KWhToDenmark` (negative convention, gas leaving transmission) is used as the consumption proxy.
 
-**Known limitation — structural undercount (~20–28%)**: A significant share of Danish gas consumption comes from **biogas injected directly into distribution networks** (DSO level). This gas never passes through the Energinet transmission system and therefore does not appear in Gasflow. This is a systemic gap that cannot be closed from publicly available data — it would require aggregated DSO metering data which is not published. The pipeline figure represents transmission-delivered consumption only. For reports, note that Danish figures are transmission-only and understate total gas use by approximately 20–28%.
+**Scope**: Natural gas only. Biogas/biomethane injected directly into distribution networks (DSO level) bypasses the Energinet transmission system and is excluded by design — this pipeline tracks natural gas demand, not biomethane. Eurostat IC_OBS includes both natural gas and biomethane, so the ~20–25% gap vs Eurostat is expected and correct for this use case.
+
+**Note**: The GasSystemRightNow dataset on Energi Data Service would include DSO-level biogas (`ExitZone_Flow`) but returns HTTP 403 for automated access.
 
 ---
 
