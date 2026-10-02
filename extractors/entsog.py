@@ -107,47 +107,55 @@ def _get_border_point_keys(country: str) -> dict[str, list[str]]:
     }
 
 
+def _fetch_one_point(pk: str, direction: str, from_date: date, to_date: date) -> list[dict]:
+    params = {
+        "pointKey":   pk,
+        "indicator":  FLOW_INDICATOR,
+        "periodType": "day",
+        "timezone":   "CET",
+        "from":       from_date.isoformat(),
+        "to":         to_date.isoformat(),
+        "limit":      10000,
+        "format":     "json",
+    }
+    records = []
+    try:
+        data = _query("operationalData", params)
+        for row in data.get("operationalData", []):
+            if row.get("directionKey") != direction:
+                continue
+            val = row.get("value")
+            period = row.get("periodFrom", "")[:10]
+            if val is None or val == "" or not period:
+                continue
+            try:
+                records.append({"date": period, "twh": float(val) / 1e9})
+            except (TypeError, ValueError):
+                continue
+    except Exception as e:
+        logger.debug(f"ENTSOG {direction} flow for {pk}: {e}")
+    return records
+
+
 def _fetch_point_flows(
     point_keys: list[str],
     direction: str,
     from_date: date,
     to_date: date,
+    max_workers: int = 8,
 ) -> pd.DataFrame:
     """
     Fetch daily physical flow for a list of point keys, filtering to the given direction.
     Returns DataFrame with [date, twh] aggregated across all points.
+    Requests are parallelised (default 8 workers) to handle large point lists (e.g. GR).
     """
+    import concurrent.futures
     all_records = []
-    for pk in point_keys:
-        params = {
-            "pointKey":  pk,
-            "indicator": FLOW_INDICATOR,
-            "periodType": "day",
-            "timezone":  "CET",
-            "from":      from_date.isoformat(),
-            "to":        to_date.isoformat(),
-            "limit":     10000,
-            "format":    "json",
-        }
-        try:
-            data = _query("operationalData", params)
-            rows = data.get("operationalData", [])
-            for row in rows:
-                if row.get("directionKey") != direction:
-                    continue
-                val = row.get("value")
-                if val is None or val == "":
-                    continue
-                period = row.get("periodFrom", "")[:10]
-                if not period:
-                    continue
-                try:
-                    twh = float(val) / 1e9  # kWh/day → TWh
-                except (TypeError, ValueError):
-                    continue
-                all_records.append({"date": period, "twh": twh})
-        except Exception as e:
-            logger.debug(f"ENTSOG {direction} flow for {pk}: {e}")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = [pool.submit(_fetch_one_point, pk, direction, from_date, to_date)
+                   for pk in point_keys]
+        for f in concurrent.futures.as_completed(futures):
+            all_records.extend(f.result())
 
     if not all_records:
         return pd.DataFrame()

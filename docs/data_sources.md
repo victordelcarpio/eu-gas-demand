@@ -20,13 +20,13 @@ This document describes the data source used for each country in the pipeline: w
 | LT | National TSO API | Amber Grid open data | Daily | Distribution systems + directly connected | ~2–16% | Oct 2021 | D+1 |
 | NL | ENTSOG Physical Flow | ENTSOG TP / GTS (NL-TSO-0001) | Daily | Distribution + final consumers | ~3–5% | ~2012 | D+1 |
 | BE | ENTSOG Physical Flow | ENTSOG TP (Fluxys) | Daily | Distribution + industrial exit points | ~3–6% | ~2012 | D+1 |
-| PL | ENTSOG aggregated | ENTSOG TP | Daily | Aggregated exit (GAZ-SYSTEM) | ~3–6% | ~2012 | D+1 |
-| HU | ENTSOG aggregated | ENTSOG TP | Daily | Aggregated exit (FGSZ) | ~3–6% | ~2012 | D+1 |
+| PL | ENTSOG Physical Flow | ENTSOG TP (GAZ-SYSTEM) | Daily | Aggregated distribution + final consumers (H/L gas) | ~10–12% | ~2012 | D+1 |
+| HU | ENTSOG Physical Flow | ENTSOG TP (FGSZ) | Daily | Aggregated distribution + final consumers | ~2–5% | ~2012 | D+1 |
 | RO | ENTSOG aggregated | ENTSOG TP | Daily | Aggregated exit (Transgaz) | ~3–6% | ~2012 | D+1 |
-| GR | ENTSOG aggregated | ENTSOG TP | Daily | Aggregated exit (DESFA) | ~3–6% | ~2012 | D+1 |
+| GR | ENTSOG Physical Flow | ENTSOG TP (DESFA) | Daily | 51 individual city/plant exit points | ~3–8% | ~2012 | D+1 |
 | PT | National TSO API | REN Data Hub | Daily | Total national system | <1% | ~2015 | D+1 |
 | HR | National TSO API | Plinacro SUKAP | Daily | Total domestic consumption | ~3–5% | ~2020 | D+1 |
-| SI | ENTSOG aggregated | ENTSOG TP | Daily | Aggregated exit (Plinovodi) | ~3–6% | ~2012 | D+1 |
+| SI | ENTSOG Physical Flow | ENTSOG TP (Plinovodi) | Daily | Single distribution exit point (DIS-00059) | <2% | ~2012 | D+1 |
 | BG | ENTSOG Physical Flow | ENTSOG TP (Bulgartransgaz) | Daily | Main exit point (FNC-00207) | ~3–6% | Oct 2021 | D+1 |
 | SK | Flow-derived | ENTSOG TP (balance) | Daily | Net imports (no domestic prod.) | ~5–10% | ~2012 | D+1 |
 | LV | Flow-derived | ENTSOG TP (balance) | Daily | Net imports (no domestic prod.) | ~5–10% | ~2012 | D+1 |

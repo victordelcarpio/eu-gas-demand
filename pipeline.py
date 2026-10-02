@@ -64,13 +64,29 @@ def _build_extractors():
             "DIS-00191", "DIS-00192",            # Fluxys exit to distribution
             "FNC-00033", "FNC-00034", "FNC-00035",  # large industrial / power
         ]),
-        ENTSOGDirectExtractor("PL"),
-        ENTSOGDirectExtractor("HU"),
+        ENTSOGPhysicalFlowExtractor("PL", [
+            "DIS-00013", "DIS-00193",   # Aggregated Distribution H-gas / L-gas
+            "FNC-00002", "FNC-00040",   # Final Consumers H-gas / L-gas
+        ]),
+        ENTSOGPhysicalFlowExtractor("HU", [
+            "DIS-00196",   # Aggregated Distribution (HU)
+            "FNC-00200",   # Aggregated Final Consumers (HU)
+        ]),
         FlowDerivedExtractor("RO"),
-        ENTSOGDirectExtractor("GR"),
+        ENTSOGPhysicalFlowExtractor("GR", [
+            "DIS-00018","DIS-00019","DIS-00020","DIS-00021","DIS-00022","DIS-00023",
+            "DIS-00024","DIS-00025","DIS-00026","DIS-00027","DIS-00028","DIS-00029",
+            "DIS-00030","DIS-00031","DIS-00032","DIS-00033","DIS-00034","DIS-00035",
+            "DIS-00036","DIS-00037","DIS-00038","DIS-00039","DIS-00040","DIS-00041",
+            "DIS-00042","DIS-00043","DIS-00044","DIS-00045","DIS-00046","DIS-00047",
+            "DIS-00048","DIS-00049","DIS-00050","DIS-00051","DIS-00052","DIS-00053",
+            "DIS-00054","DIS-00055","DIS-00056","DIS-00198","DIS-00199","DIS-00200",
+            "DIS-00203","DIS-00205","DIS-00206","DIS-00207",
+            "FNC-00038","FNC-00039","FNC-00204","FNC-00212","FNC-00214",
+        ]),
         PortugalRENExtractor(),
         CroatiaPlinacroExtractor(),
-        ENTSOGDirectExtractor("SI"),
+        ENTSOGPhysicalFlowExtractor("SI", ["DIS-00059"]),
         ENTSOGPhysicalFlowExtractor("BG", ["FNC-00207"],
                                     history_from=date(2021, 10, 1)),
         # Flow-derived — zero domestic production
