@@ -31,6 +31,7 @@ from extractors.national import (
     AustriaAGGMExtractor,
     EstoniaEleringExtractor,
     LithuaniaAmberGridExtractor,
+    NetherlandsGTSExtractor,
 )
 from extractors.entsog import ENTSOGDirectExtractor
 from extractors.flow_derived import FlowDerivedExtractor, FinlandLNGExtractor
@@ -55,7 +56,7 @@ def _build_extractors():
         DenmarkEnergiDataExtractor(),
         AustriaAGGMExtractor(),
         # Direct — ENTSOG aggregated consumption
-        ENTSOGDirectExtractor("NL"),
+        NetherlandsGTSExtractor(),
         ENTSOGDirectExtractor("BE"),
         ENTSOGDirectExtractor("PL"),
         ENTSOGDirectExtractor("HU"),
