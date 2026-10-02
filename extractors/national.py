@@ -920,3 +920,61 @@ class PortugalRENExtractor(BaseExtractor):
         df = pd.DataFrame(records)
         df = df.sort_values("date").reset_index(drop=True)
         return df
+
+
+# ── Croatia — Plinacro SUKAP ─────────────────────────────────────────────────
+
+class CroatiaPlinacroExtractor(BaseExtractor):
+    """
+    Croatia — total daily consumption from Plinacro SUKAP portal.
+
+    Endpoint: POST https://www.sukap.plinacro.hr/pub/consumption/search
+    Body: {"gasDay": "YYYY-MM-DDT00:00:00"}
+
+    Returns 24 hourly records. The last record's cumulativeCapacity is the
+    daily total in kWh (gas day 07:15 – 06:15 CET). Fetched in parallel.
+    """
+    country  = "HR"
+    source   = "Plinacro SUKAP"
+    API_URL  = "https://www.sukap.plinacro.hr/pub/consumption/search"
+
+    def _fetch_day(self, d: date):
+        try:
+            r = requests.post(
+                self.API_URL,
+                json={"gasDay": f"{d.isoformat()}T00:00:00"},
+                headers={**HEADERS, "Content-Type": "application/json"},
+                timeout=30,
+            )
+            r.raise_for_status()
+            values = r.json().get("data", {}).get("values", [])
+            if not values:
+                return None
+            last = max(values, key=lambda v: v.get("gasHour", -1))
+            cumulative = last.get("cumulativeCapacity")
+            if cumulative is None or cumulative <= 0:
+                return None
+            return {"date": d, "twh": float(cumulative) / 1e9}
+        except Exception as e:
+            logger.warning(f"Plinacro HR {d}: {e}")
+            return None
+
+    def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
+        all_dates = []
+        d = from_date
+        while d <= to_date:
+            all_dates.append(d)
+            d += timedelta(days=1)
+
+        records = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            futures = [pool.submit(self._fetch_day, day) for day in all_dates]
+            for future in concurrent.futures.as_completed(futures):
+                result = future.result()
+                if result is not None:
+                    records.append(result)
+
+        if not records:
+            return pd.DataFrame()
+        df = pd.DataFrame(records)
+        return df.sort_values("date").reset_index(drop=True)

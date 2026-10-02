@@ -33,6 +33,7 @@ from extractors.national import (
     LithuaniaAmberGridExtractor,
     NetherlandsGTSExtractor,
     PortugalRENExtractor,
+    CroatiaPlinacroExtractor,
 )
 from extractors.entsog import ENTSOGDirectExtractor, ENTSOGPhysicalFlowExtractor
 from extractors.flow_derived import FlowDerivedExtractor, FinlandLNGExtractor
@@ -67,7 +68,7 @@ def _build_extractors():
         FlowDerivedExtractor("RO"),
         ENTSOGDirectExtractor("GR"),
         PortugalRENExtractor(),
-        ENTSOGDirectExtractor("HR"),
+        CroatiaPlinacroExtractor(),
         ENTSOGDirectExtractor("SI"),
         ENTSOGPhysicalFlowExtractor("BG", ["FNC-00207"],
                                     history_from=date(2021, 10, 1)),
