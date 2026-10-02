@@ -773,3 +773,77 @@ class LithuaniaAmberGridExtractor(BaseExtractor):
         df["date"] = pd.to_datetime(df["date"]).dt.date
         df = df[(df["date"] >= from_date) & (df["date"] <= to_date)]
         return df.groupby("date", as_index=False)["twh"].sum()
+
+
+# ── Netherlands — GTS via ENTSOG ──────────────────────────────────────────────
+
+class NetherlandsGTSExtractor(BaseExtractor):
+    """
+    Netherlands — gas consumption via ENTSOG Transparency Platform.
+
+    GTS (Gasunie Transport Services) no longer publishes its own transparency
+    portal; all data is on ENTSOG TP (confirmed at gts.nl/transparency).
+
+    The generic ENTSOGDirectExtractor fails for NL because GTS does not publish
+    Nomination data. The correct indicator is 'Physical Flow', filtered to
+    the two domestic exit categories:
+      - Distribution        → gas to local distribution companies (residential,
+                              small commercial, small industrial)
+      - Final Consumers     → large industrial users and power plants connected
+                              directly to the GTS transmission system
+
+    Excludes: Storage (injection/withdrawal), LNG terminals, cross-border exports.
+
+    Requests are chunked year-by-year to avoid hitting ENTSOG result limits.
+    Own-use gap vs Eurostat IC_OBS is expected at ~4–8% (compression fuel,
+    line-pack, unaccounted-for gas not reported via Physical Flow).
+    """
+    country = "NL"
+    source  = "ENTSOG / GTS (Gasunie Transport Services)"
+
+    ENTSOG_BASE      = "https://transparency.entsog.eu/api/v1"
+    OPERATOR_KEY     = "NL-TSO-0001"
+    DOMESTIC_CATS    = {"Distribution", "Final Consumers"}
+
+    def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
+        records = []
+        year = from_date.year
+        while year <= to_date.year:
+            y_start = date(year, 1, 1) if year > from_date.year else from_date
+            y_end   = date(year, 12, 31) if year < to_date.year else to_date
+            params = {
+                "operatorKey":  self.OPERATOR_KEY,
+                "directionKey": "exit",
+                "indicator":    "Physical Flow",
+                "periodType":   "day",
+                "from":         y_start.isoformat(),
+                "to":           y_end.isoformat(),
+                "format":       "json",
+                "limit":        5000,
+            }
+            try:
+                r = requests.get(
+                    f"{self.ENTSOG_BASE}/aggregatedData",
+                    params=params, headers=HEADERS, timeout=90,
+                )
+                r.raise_for_status()
+                for row in r.json().get("aggregatedData", []):
+                    if row.get("adjacentSystemsKey") not in self.DOMESTIC_CATS:
+                        continue
+                    val    = row.get("value")
+                    period = (row.get("periodFrom") or "")[:10]
+                    if val is None or not period:
+                        continue
+                    records.append({"date": period, "twh": float(val) / 1e9})
+            except Exception as e:
+                logger.warning(f"ENTSOG NL {year}: {e}")
+            year += 1
+            time.sleep(0.5)
+
+        if not records:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(records)
+        df["date"] = pd.to_datetime(df["date"]).dt.date
+        df = df[(df["date"] >= from_date) & (df["date"] <= to_date)]
+        return df.groupby("date", as_index=False)["twh"].sum()
