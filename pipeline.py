@@ -28,6 +28,7 @@ from extractors.national import (
     SpainEnagasExtractor,
     CzechOTEExtractor,
     DenmarkEnergiDataExtractor,
+    SwedenEnergidataExtractor,
     AustriaAGGMExtractor,
     EstoniaEleringExtractor,
     LithuaniaAmberGridExtractor,
@@ -72,7 +73,10 @@ def _build_extractors():
             "DIS-00196",   # Aggregated Distribution (HU)
             "FNC-00200",   # Aggregated Final Consumers (HU)
         ]),
-        FlowDerivedExtractor("RO"),
+        ENTSOGPhysicalFlowExtractor("RO", [
+            "DIS-00058",   # Transgaz delivery to distribution networks
+            "FNC-00010",   # Transgaz delivery to large final consumers
+        ]),
         ENTSOGPhysicalFlowExtractor("GR", [
             "DIS-00018","DIS-00019","DIS-00020","DIS-00021","DIS-00022","DIS-00023",
             "DIS-00024","DIS-00025","DIS-00026","DIS-00027","DIS-00028","DIS-00029",
@@ -98,7 +102,7 @@ def _build_extractors():
         FlowDerivedExtractor("LV"),
         LithuaniaAmberGridExtractor(),
         EstoniaEleringExtractor(),
-        FlowDerivedExtractor("SE"),
+        SwedenEnergidataExtractor(),
         FinlandGasgridExtractor(),   # direct (Excel); falls back to LNG below
         FinlandLNGExtractor(),       # flow-derived fallback for current month
     ]

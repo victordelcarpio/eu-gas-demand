@@ -563,6 +563,48 @@ class DenmarkEnergiDataExtractor(BaseExtractor):
             return pd.DataFrame()
 
 
+# ── Sweden — Energi Data Service (Energinet) ─────────────────────────────────
+
+class SwedenEnergidataExtractor(BaseExtractor):
+    """
+    Sweden shares a balancing zone with Denmark; all Swedish gas supply crosses
+    the DK→SE interconnection at Dragør. The Energinet Gasflow dataset publishes
+    daily `KWhToSweden` (negative convention) which equals Swedish gas demand
+    plus any net storage injection at the Skallen UGS facility.
+
+    No Swedish domestic production exists, so net border flow ≈ consumption.
+    The storage component is small (~1–3% of consumption). History from 2018.
+    """
+    country = "SE"
+    source  = "Energi Data Service (Energinet) — KWhToSweden"
+    method  = "flow_derived"
+
+    API_URL = "https://api.energidataservice.dk/dataset/Gasflow"
+
+    def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
+        params = {
+            "start": from_date.isoformat(),
+            "end":   to_date.isoformat(),
+            "limit": 10000,
+            "sort":  "GasDay asc",
+        }
+        try:
+            r = requests.get(self.API_URL, params=params, headers=HEADERS, timeout=30)
+            r.raise_for_status()
+            records_raw = r.json().get("records", [])
+            if not records_raw:
+                return pd.DataFrame()
+            df = pd.DataFrame(records_raw)
+            df["date"] = pd.to_datetime(df["GasDay"]).dt.date
+            df["twh"] = pd.to_numeric(df["KWhToSweden"], errors="coerce").abs() / 1e9
+            df = df[(df["date"] >= from_date) & (df["date"] <= to_date)]
+            df = df[df["twh"] > 0]
+            return df.groupby("date", as_index=False)["twh"].sum()
+        except Exception as e:
+            logger.warning(f"Energi Data Service (SE): {e}")
+            return pd.DataFrame()
+
+
 # ── Austria — AGGM ───────────────────────────────────────────────────────────
 
 class AustriaAGGMExtractor(BaseExtractor):

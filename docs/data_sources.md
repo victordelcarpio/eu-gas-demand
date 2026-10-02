@@ -22,7 +22,7 @@ This document describes the data source used for each country in the pipeline: w
 | BE | ENTSOG Physical Flow | ENTSOG TP (Fluxys) | Daily | Distribution + industrial exit points | ~3–6% | ~2012 | D+1 |
 | PL | ENTSOG Physical Flow | ENTSOG TP (GAZ-SYSTEM) | Daily | Aggregated distribution + final consumers (H/L gas) | ~10–12% | ~2012 | D+1 |
 | HU | ENTSOG Physical Flow | ENTSOG TP (FGSZ) | Daily | Aggregated distribution + final consumers | ~2–5% | ~2012 | D+1 |
-| RO | ENTSOG aggregated | ENTSOG TP | Daily | Aggregated exit (Transgaz) | ~3–6% | ~2012 | D+1 |
+| RO | ENTSOG Physical Flow | ENTSOG TP (Transgaz) | Daily | Distribution + final consumers | ~5–10% | Jan 2021 | D+1 |
 | GR | ENTSOG Physical Flow | ENTSOG TP (DESFA) | Daily | 51 individual city/plant exit points | ~3–8% | ~2012 | D+1 |
 | PT | National TSO API | REN Data Hub | Daily | Total national system | <1% | ~2015 | D+1 |
 | HR | National TSO API | Plinacro SUKAP | Daily | Total domestic consumption | ~3–5% | ~2020 | D+1 |
@@ -30,7 +30,7 @@ This document describes the data source used for each country in the pipeline: w
 | BG | ENTSOG Physical Flow | ENTSOG TP (Bulgartransgaz) | Daily | Main exit point (FNC-00207) | ~3–6% | Oct 2021 | D+1 |
 | SK | Flow-derived | ENTSOG TP (balance) | Daily | Net imports (no domestic prod.) | ~5–10% | ~2012 | D+1 |
 | LV | Flow-derived | ENTSOG TP (balance) | Daily | Net imports (no domestic prod.) | ~5–10% | ~2012 | D+1 |
-| SE | Flow-derived | ENTSOG TP (balance) | Daily | Net imports (no domestic prod.) | ~5–10% | ~2012 | D+1 |
+| SE | Border flow | Energi Data Service (Energinet) — KWhToSweden | Daily | DK→SE cross-border flow (≈ consumption) | ~3–5% | 2018 | D+1 |
 | FI | National TSO Excel + flow-derived | Gasgrid Finland (Excel) + ALSI LNG | Daily | Total system (completed months from Excel; current month from LNG sendout) | ~2–5% hist.; ~5–10% current | ~2020 | M+1w hist.; D+1 current |
 
 †† Denmark gap vs Eurostat IC_OBS is intentional: Eurostat includes biomethane/biogas injected at DSO level; this pipeline tracks natural gas only. The Energinet Gasflow dataset covers natural gas through the transmission system and is the correct scope.
