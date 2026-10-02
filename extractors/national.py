@@ -254,71 +254,72 @@ class FranceGRTGazExtractor(BaseExtractor):
 
 class UKNationalGasExtractor(BaseExtractor):
     """
-    National Gas (formerly National Grid Gas Transmission) daily demand data.
+    National Gas NTS actual demand via the public operationaldata API.
 
-    As of 2025, the MIP portal (mip-prd-web.azurewebsites.net) has been replaced
-    by a React SPA at data.nationalgas.com. The new download API
-    (/api/find-gas-data-download) requires OAuth credentials obtained from:
-        https://apideveloper.nationalgas.com/s/
+    Endpoint: POST https://api.nationalgas.com/operationaldata/v1/publications/gasday
+    Publication: PUBOBJ1030 — "Demand Actual, NTS, D+1 (Energy)"
+    Values in kWh; converted to TWh (÷ 1e9). No authentication required.
 
-    Set env var NATIONAL_GAS_API_TOKEN to a valid Bearer token to enable.
-    Without it this extractor returns empty.
+    Requests are batched in 365-day chunks to stay within API limits.
     """
-    country = "GB"
-    source  = "National Gas / Xoserve"
+    country  = "GB"
+    source   = "National Gas (NTS actual demand)"
+    API_URL  = "https://api.nationalgas.com/operationaldata/v1/publications/gasday"
+    PUB_ID   = "PUBOBJ1030"
+    CHUNK    = 365
 
-    DOWNLOAD_URL = "https://data.nationalgas.com/api/find-gas-data-download"
-
-    def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
-        import os
-        token = os.environ.get("NATIONAL_GAS_API_TOKEN", "").strip()
-        if not token:
-            logger.warning(
-                "UKNationalGasExtractor: NATIONAL_GAS_API_TOKEN not set. "
-                "The National Gas data portal now requires OAuth credentials. "
-                "Register at https://apideveloper.nationalgas.com/s/ to obtain "
-                "an API token, then set the NATIONAL_GAS_API_TOKEN env var."
-            )
-            return pd.DataFrame()
-
-        params = {
-            "dateFrom":    from_date.isoformat(),
-            "dateTo":      to_date.isoformat(),
-            "dateType":    "GASDAY",
-            "applicableFor": "Y",
-            "latestFlag":  "N",
-            "ids":         "PUBOBJ1030",  # Demand Actual, NTS, D+1 (Energy)
-            "type":        "csv",
-        }
-        auth_headers = {**HEADERS, "Authorization": f"Bearer {token}"}
+    def _fetch_chunk(self, from_date: date, to_date: date) -> list[dict]:
         try:
-            r = requests.get(
-                self.DOWNLOAD_URL, params=params, headers=auth_headers, timeout=30
+            r = requests.post(
+                self.API_URL,
+                json={
+                    "publicationIds": [self.PUB_ID],
+                    "fromDate": from_date.isoformat(),
+                    "toDate":   to_date.isoformat(),
+                },
+                headers={**HEADERS, "Content-Type": "application/json"},
+                timeout=30,
             )
             r.raise_for_status()
-
-            lines = r.text.strip().splitlines()
-            header_idx = 0
-            for i, line in enumerate(lines):
-                low = line.lower()
-                if "," in line and any(k in low for k in ("date", "value", "demand")):
-                    header_idx = i
-                    break
-            df = pd.read_csv(StringIO("\n".join(lines[header_idx:])))
-            df.columns = [c.strip().lower() for c in df.columns]
-
-            date_col  = next(c for c in df.columns if "date" in c)
-            value_col = next(
-                c for c in df.columns if "value" in c or "demand" in c or "quantity" in c
-            )
-            df["date"] = pd.to_datetime(df[date_col], dayfirst=True, errors="coerce").dt.date
-            df["twh"]  = pd.to_numeric(df[value_col], errors="coerce") / 1000
-            df = df.dropna(subset=["date", "twh"])
-            df = df[(df["date"] >= from_date) & (df["date"] <= to_date)]
-            return df.groupby("date", as_index=False)["twh"].sum()
+            pubs = r.json()
+            records = []
+            for pub in pubs:
+                for entry in pub.get("publications", []):
+                    d_str = entry.get("applicableFor", "")[:10]
+                    val   = entry.get("value")
+                    if not d_str or val is None:
+                        continue
+                    try:
+                        records.append({
+                            "date": date.fromisoformat(d_str),
+                            "twh":  float(val) / 1e9,
+                        })
+                    except (ValueError, TypeError):
+                        continue
+            return records
         except Exception as e:
-            logger.warning(f"National Gas API: {e}")
+            logger.warning(f"National Gas API {from_date}–{to_date}: {e}")
+            return []
+
+    def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
+        all_records = []
+        chunk_start = from_date
+        while chunk_start <= to_date:
+            chunk_end = min(
+                date(chunk_start.year + (1 if chunk_start.month == 12 else 0),
+                     (chunk_start.month % 12) + 1, 1) - timedelta(days=1),
+                to_date,
+            )
+            # simpler: just step by CHUNK days
+            chunk_end = min(chunk_start + timedelta(days=self.CHUNK - 1), to_date)
+            all_records.extend(self._fetch_chunk(chunk_start, chunk_end))
+            chunk_start = chunk_end + timedelta(days=1)
+
+        if not all_records:
             return pd.DataFrame()
+        df = pd.DataFrame(all_records)
+        df = df[(df["date"] >= from_date) & (df["date"] <= to_date)]
+        return df.groupby("date", as_index=False)["twh"].sum().sort_values("date").reset_index(drop=True)
 
 
 # ── Italy — Snam Rete Gas ─────────────────────────────────────────────────────

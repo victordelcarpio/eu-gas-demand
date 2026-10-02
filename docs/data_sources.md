@@ -10,7 +10,7 @@ This document describes the data source used for each country in the pipeline: w
 |---------|---------------|--------|-------------|-----------------|-------------|--------------|-----|
 | DE | National TSO API* | Trading Hub Europe (THE) | Daily | Total system (transmission) | ~3–5% | 2019 | D+1 |
 | FR | National TSO API | ODRÉ / GRTGaz-TEREGA | Daily (half-hourly agg.) | Total system (trans. + dist.) | <1% | Jan 2012 | ~6 weeks (main); D+2 (sector fill) |
-| GB | National TSO API* | National Gas / Xoserve | Daily | Total NTS demand | ~3–5% | — | D+1 |
+| GB | National TSO API | National Gas operationaldata API | Daily | Total NTS demand | ~3–5% | ~2015 | D+1 |
 | IT | ENTSOG allocation | Snam Rete Gas — 3 points | Daily | Distribution + industrial + power | ~4–8% | ~2010 | D+1 |
 | ES | National TSO API | Enagas | Daily | Total national system | ~2–4% | ~2015 | D+2 |
 | CZ | National market op. | OTE (V0/V1 evaluation) | Daily | Total system | ~3–5% | ~2015 | D+3 (V0); M+16d (V1) |
@@ -33,7 +33,6 @@ This document describes the data source used for each country in the pipeline: w
 | SE | Flow-derived | ENTSOG TP (balance) | Daily | Net imports (no domestic prod.) | ~5–10% | ~2012 | D+1 |
 | FI | National TSO Excel + flow-derived | Gasgrid Finland (Excel) + ALSI LNG | Daily | Total system (completed months from Excel; current month from LNG sendout) | ~2–5% hist.; ~5–10% current | ~2020 | M+1w hist.; D+1 current |
 
-\* Requires API token (see README)  
 †† Denmark gap vs Eurostat IC_OBS is intentional: Eurostat includes biomethane/biogas injected at DSO level; this pipeline tracks natural gas only. The Energinet Gasflow dataset covers natural gas through the transmission system and is the correct scope.
 
 ---
@@ -78,13 +77,13 @@ This is a structural limitation of the ENTSOG Transparency Platform data. It is 
 
 ---
 
-### United Kingdom (GB) — National Gas / Xoserve
+### United Kingdom (GB) — National Gas operationaldata API
 
-**What**: NTS (National Transmission System) actual demand at D+1. The new download API (`data.nationalgas.com`) replaced the old MIP portal in 2025. Reports in GWh, converted to TWh.
+**What**: NTS (National Transmission System) actual demand at D+1. Publication `PUBOBJ1030` — "Demand Actual, NTS, D+1 (Energy)". Values in kWh, converted to TWh (÷ 1e9). Fetched via `POST https://api.nationalgas.com/operationaldata/v1/publications/gasday`.
 
-**Access**: Requires OAuth token from `https://apideveloper.nationalgas.com/s/`. Set `NATIONAL_GAS_API_TOKEN` environment variable.
+**Access**: Public API, no authentication required.
 
-**Coverage**: Transmission system demand. UK gas day is 06:00–06:00 UTC.
+**Coverage**: Transmission system demand. UK gas day is 06:00–06:00 UTC. Validated Q1 2024: 224 TWh across 91 days.
 
 ---
 
