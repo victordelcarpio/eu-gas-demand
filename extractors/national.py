@@ -13,6 +13,7 @@ Austria  : AGGM via WIFO CSV
 
 from datetime import date, timedelta
 from io import BytesIO, StringIO
+import concurrent.futures
 import time
 import zipfile
 import pandas as pd
@@ -847,3 +848,58 @@ class NetherlandsGTSExtractor(BaseExtractor):
         df["date"] = pd.to_datetime(df["date"]).dt.date
         df = df[(df["date"] >= from_date) & (df["date"] <= to_date)]
         return df.groupby("date", as_index=False)["twh"].sum()
+
+
+# ── Portugal — REN Data Hub ────────────────────────────────────────────────────
+
+class PortugalRENExtractor(BaseExtractor):
+    """
+    Portugal — total national gas consumption from REN Data Hub.
+
+    Endpoint: servicebus.ren.pt/datahubapi/gas/GasConsumptionSupplyDaily
+    Returns GWh/day. TOTAL_CONSUMPTION covers all end-user categories
+    (conventional market + power generation + autonomous gas units).
+    """
+
+    country  = "PT"
+    source   = "REN Data Hub (servicebus.ren.pt)"
+    BASE_URL = "https://servicebus.ren.pt/datahubapi/gas/GasConsumptionSupplyDaily"
+
+    def _fetch_day(self, d: date):
+        try:
+            r = requests.get(
+                self.BASE_URL,
+                params={"culture": "en-US", "date": d.isoformat()},
+                headers=HEADERS,
+                timeout=30,
+            )
+            r.raise_for_status()
+            for item in r.json():
+                if item.get("type") == "TOTAL_CONSUMPTION":
+                    val = item.get("daily_Accumulation")
+                    if val is not None:
+                        return {"date": d, "twh": float(val) / 1000}
+        except Exception as e:
+            logger.warning(f"REN PT {d}: {e}")
+        return None
+
+    def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
+        all_dates = []
+        d = from_date
+        while d <= to_date:
+            all_dates.append(d)
+            d += timedelta(days=1)
+
+        records = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            futures = [pool.submit(self._fetch_day, day) for day in all_dates]
+            for future in concurrent.futures.as_completed(futures):
+                result = future.result()
+                if result is not None:
+                    records.append(result)
+
+        if not records:
+            return pd.DataFrame()
+        df = pd.DataFrame(records)
+        df = df.sort_values("date").reset_index(drop=True)
+        return df

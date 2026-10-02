@@ -18,13 +18,13 @@ This document describes the data source used for each country in the pipeline: w
 | AT | National system op. | AGGM | Daily | Total system | ~3–5% | ~2019 | D+1 |
 | EE | National TSO API | Elering Dashboard | Hourly (agg. to daily) | Total domestic flow from transmission | ~2–3% | ~2015 | D+1 |
 | LT | National TSO API | Amber Grid open data | Daily | Distribution systems + directly connected | ~2–16% | Oct 2021 | D+1 |
-| NL | ENTSOG aggregated | ENTSOG TP (broken) | — | — | — | — | — |
+| NL | ENTSOG Physical Flow | ENTSOG TP / GTS (NL-TSO-0001) | Daily | Distribution + final consumers | ~3–5% | ~2012 | D+1 |
 | BE | ENTSOG aggregated | ENTSOG TP | Daily | Aggregated exit (Fluxys) | ~3–6% | ~2012 | D+1 |
 | PL | ENTSOG aggregated | ENTSOG TP | Daily | Aggregated exit (GAZ-SYSTEM) | ~3–6% | ~2012 | D+1 |
 | HU | ENTSOG aggregated | ENTSOG TP | Daily | Aggregated exit (FGSZ) | ~3–6% | ~2012 | D+1 |
 | RO | ENTSOG aggregated | ENTSOG TP | Daily | Aggregated exit (Transgaz) | ~3–6% | ~2012 | D+1 |
 | GR | ENTSOG aggregated | ENTSOG TP | Daily | Aggregated exit (DESFA) | ~3–6% | ~2012 | D+1 |
-| PT | ENTSOG aggregated | ENTSOG TP | Daily | Aggregated exit (REN) | ~3–6% | ~2012 | D+1 |
+| PT | National TSO API | REN Data Hub | Daily | Total national system | <1% | ~2015 | D+1 |
 | HR | ENTSOG aggregated | ENTSOG TP | Daily | Aggregated exit (Plinacro) | ~3–6% | ~2012 | D+1 |
 | SI | ENTSOG aggregated | ENTSOG TP | Daily | Aggregated exit (Plinovodi) | ~3–6% | ~2012 | D+1 |
 | BG | ENTSOG aggregated | ENTSOG TP | Daily | Aggregated exit (Bulgartransgaz) | ~3–6% | ~2012 | D+1 |
@@ -159,13 +159,25 @@ The API is at `ambergrid.lt/en/lietuvos-suvartojimo-duomenu-skaiciuokle/755/sear
 
 ---
 
-### ENTSOG Transparency Platform (BE, PL, HU, RO, GR, PT, HR, SI, BG)
+### Portugal (PT) — REN Data Hub
+
+**What**: REN (Redes Energéticas Nacionais) publishes daily total national gas consumption via their public Data Hub API. The `TOTAL_CONSUMPTION` field sums all end-user categories: conventional market (residential + commercial + industrial), power generation (CCGT), and autonomous gas units.
+
+**Access**: Public API, no authentication required.
+
+**Coverage**: Total national gas system. Validated against Eurostat IC_OBS at mean −0.1% over 2023–2024 (24 months), max 0.4%. The REN figure is a metered mass-balance total, not ENTSOG allocation — hence the near-zero gap.
+
+**History**: Available from approximately 2015. The API returns one day per request; the extractor fetches the requested range in parallel (8 threads).
+
+---
+
+### ENTSOG Transparency Platform (BE, PL, HU, RO, GR, HR, SI, BG)
 
 **What**: For these countries the pipeline uses ENTSOG's aggregated exit data (`/api/v1/aggregatedData`, indicator `Nomination` or `Allocation`). This gives daily kWh at the national TSO level.
 
 **Coverage**: Transmission-level allocation only. See "own-use gap" section above for the systematic undercount.
 
-**Note**: The ENTSOG aggregated endpoint is inconsistently implemented across operators. Netherlands (NL) is currently broken (returns empty). Countries where the endpoint works typically show 3–6% undercount vs Eurostat.
+**Note**: The ENTSOG aggregated endpoint is inconsistently implemented across operators. Countries where the endpoint works typically show 3–6% undercount vs Eurostat.
 
 ---
 
