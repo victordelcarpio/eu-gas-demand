@@ -99,6 +99,79 @@ class GermanyTHEExtractor(BaseExtractor):
         return df.groupby("date", as_index=False)["twh"].sum()
 
 
+# ── Germany — Eurostat monthly fallback ──────────────────────────────────────
+
+class GermanyEurostatExtractor(BaseExtractor):
+    """
+    Monthly German gas demand from Eurostat nrg_cb_gasm (IC_OBS, GEO=DE).
+    Unit TJ_GCV → TWh (÷3600). Monthly total distributed uniformly across days.
+
+    Used as fallback when THE_API_TOKEN is not set. Lag ~2 months; data is
+    the definitive Eurostat figure so accuracy vs IC_OBS is exact by definition.
+    Most recent 3 months marked provisional (Eurostat revises early estimates).
+    """
+    country     = "DE"
+    source      = "Eurostat nrg_cb_gasm (monthly, distributed)"
+    method      = "direct"
+
+    API_URL = (
+        "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/nrg_cb_gasm"
+    )
+
+    def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
+        import calendar
+        params = {
+            "format": "JSON", "lang": "EN",
+            "freq": "M", "unit": "TJ_GCV",
+            "nrg_bal": "IC_OBS", "geo": "DE",
+            "sinceTimePeriod": f"{from_date.year - 1}-01",
+        }
+        try:
+            r = requests.get(self.API_URL, params=params, headers=HEADERS, timeout=60)
+            r.raise_for_status()
+            data = r.json()
+        except Exception as e:
+            logger.warning(f"Eurostat DE: {e}")
+            return pd.DataFrame()
+
+        dims = data.get("dimension", {})
+        time_idx = {v: k for k, v in dims.get("time", {}).get("category", {}).get("index", {}).items()}
+        values = data.get("value", {})
+
+        monthly = {}
+        for str_idx, val in values.items():
+            period = time_idx.get(int(str_idx))
+            if period:
+                monthly[period] = float(val) / 3600  # TJ_GCV → TWh
+
+        if not monthly:
+            return pd.DataFrame()
+
+        # Determine provisional cutoff: last 3 published months are provisional
+        sorted_periods = sorted(monthly)
+        provisional_set = set(sorted_periods[-3:])
+
+        records = []
+        for period, monthly_twh in monthly.items():
+            yr, mo = int(period[:4]), int(period[5:7])
+            days_in_month = calendar.monthrange(yr, mo)[1]
+            daily_twh = monthly_twh / days_in_month
+            for day in range(1, days_in_month + 1):
+                d = date(yr, mo, day)
+                if from_date <= d <= to_date:
+                    records.append({
+                        "date":        d,
+                        "twh":         daily_twh,
+                        "provisional": period in provisional_set,
+                    })
+
+        if not records:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(records)
+        return df.sort_values("date").reset_index(drop=True)
+
+
 # ── France — ODRÉ (RTE/GRTGaz/TEREGA open data) ──────────────────────────────
 
 class FranceGRTGazExtractor(BaseExtractor):
@@ -498,76 +571,19 @@ class SpainEnagasExtractor(BaseExtractor):
 
 class CzechOTEExtractor(BaseExtractor):
     """
-    OTE (Czech gas and electricity market operator) publishes daily
-    gas evaluations as ZIP files containing CSV data.
-
-    V0 evaluation: published D+3, provisional
-    V1 evaluation: published 16th of following month, more final
-
-    Days are fetched concurrently (up to 16 threads) to keep runtime
-    manageable over multi-year ranges. Each thread downloads one day's ZIP.
+    Stub — not used. OTE's old ZIP URL (/cs/statistika/plynovy-trh) was removed
+    when the site restructured in late 2024. The replacement aggregated imbalance
+    Excel reports "Off-take from System Total Volume" which includes transit
+    flows through CZ to neighbouring countries — NOT domestic consumption only.
+    Czech consumption is sourced from ENTSOG Physical Flow (DIS-00208 + FNC-00215)
+    registered directly in pipeline.py instead.
     """
     country = "CZ"
     source  = "OTE (Czech gas market operator)"
 
-    BASE_URL = "https://www.ote-cr.cz/cs/statistika/plynovy-trh"
-    MAX_WORKERS = 16
-
     def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
-        import concurrent.futures as cf
-
-        days = [
-            from_date + timedelta(days=i)
-            for i in range((to_date - from_date).days + 1)
-        ]
-
-        records = []
-        with cf.ThreadPoolExecutor(max_workers=self.MAX_WORKERS) as pool:
-            results = {pool.submit(self._fetch_day, d): d for d in days}
-            for future, d in results.items():
-                try:
-                    twh = future.result(timeout=30)
-                    if twh is not None:
-                        records.append({"date": d, "twh": twh})
-                except Exception as e:
-                    logger.debug(f"OTE {d}: {e}")
-
-        return pd.DataFrame(records) if records else pd.DataFrame()
-
-    def _fetch_day(self, day: date) -> float | None:
-        """Try V1 first (more accurate), fall back to V0."""
-        for version in ["V1", "V0"]:
-            url = (
-                f"{self.BASE_URL}/{version}/"
-                f"{version}_{day.strftime('%Y%m%d')}.zip"
-            )
-            try:
-                r = requests.get(url, headers=HEADERS, timeout=20)
-                if r.status_code == 404:
-                    continue
-                r.raise_for_status()
-                with zipfile.ZipFile(BytesIO(r.content)) as z:
-                    csv_name = next(
-                        (n for n in z.namelist() if n.endswith(".csv")), None
-                    )
-                    if not csv_name:
-                        continue
-                    with z.open(csv_name) as f:
-                        df = pd.read_csv(f, sep=";", decimal=",",
-                                         encoding="utf-8-sig", header=0)
-                        val_col = next(
-                            (c for c in df.columns
-                             if "spotřeba" in c.lower() or "consumption" in c.lower()
-                             or "celkem" in c.lower() or "spot" in c.lower()),
-                            None
-                        )
-                        if val_col is None:
-                            continue
-                        total_mwh = pd.to_numeric(df[val_col], errors="coerce").sum()
-                        return float(total_mwh) / 1_000_000  # MWh → TWh
-            except Exception as e:
-                logger.debug(f"OTE {version} {day}: {e}")
-        return None
+        logger.debug("CzechOTEExtractor: stub — CZ data comes from ENTSOG Physical Flow")
+        return pd.DataFrame()
 
 
 # ── Denmark — Energi Data Service ────────────────────────────────────────────
@@ -617,6 +633,48 @@ class DenmarkEnergiDataExtractor(BaseExtractor):
             return df.groupby("date", as_index=False)["twh"].sum()
         except Exception as e:
             logger.warning(f"Energi Data Service: {e}")
+            return pd.DataFrame()
+
+
+# ── Sweden — Energi Data Service (Energinet) ─────────────────────────────────
+
+class SwedenEnergidataExtractor(BaseExtractor):
+    """
+    Sweden shares a balancing zone with Denmark; all Swedish gas supply crosses
+    the DK→SE interconnection at Dragør. The Energinet Gasflow dataset publishes
+    daily `KWhToSweden` (negative convention) which equals Swedish gas demand
+    plus any net storage injection at the Skallen UGS facility.
+
+    No Swedish domestic production exists, so net border flow ≈ consumption.
+    The storage component is small (~1–3% of consumption). History from 2018.
+    """
+    country = "SE"
+    source  = "Energi Data Service (Energinet) — KWhToSweden"
+    method  = "flow_derived"
+
+    API_URL = "https://api.energidataservice.dk/dataset/Gasflow"
+
+    def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
+        params = {
+            "start": from_date.isoformat(),
+            "end":   to_date.isoformat(),
+            "limit": 10000,
+            "sort":  "GasDay asc",
+        }
+        try:
+            r = requests.get(self.API_URL, params=params, headers=HEADERS, timeout=30)
+            r.raise_for_status()
+            records_raw = r.json().get("records", [])
+            if not records_raw:
+                return pd.DataFrame()
+            df = pd.DataFrame(records_raw)
+            df["date"] = pd.to_datetime(df["GasDay"]).dt.date
+            df["twh"] = pd.to_numeric(df["KWhToSweden"], errors="coerce").abs() / 1e9
+            df = df[(df["date"] >= from_date) & (df["date"] <= to_date)]
+            df = df[df["twh"] > 0]
+            return df.groupby("date", as_index=False)["twh"].sum()
+        except Exception as e:
+            logger.warning(f"Energi Data Service (SE): {e}")
             return pd.DataFrame()
 
 
@@ -979,6 +1037,173 @@ class CroatiaPlinacroExtractor(BaseExtractor):
             return pd.DataFrame()
         df = pd.DataFrame(records)
         return df.sort_values("date").reset_index(drop=True)
+
+
+# ── Germany — Trading Hub Europe (public website API) ─────────────────────────
+
+class GermanyTHEWebExtractor(BaseExtractor):
+    """
+    Germany — daily total gas consumption from Trading Hub Europe's public
+    website chart API. No authentication required.
+
+    Endpoint: api.tradinghub.eu/api/website/evoq/GetAggregierteVerbrauchsdatenChart
+    Parameter: DatumStart=MM/YYYY — returns all days in that month.
+
+    Covers the full German market area (H-Gas + L-Gas):
+      SLP (Standardlastprofil) — residential, commercial, small industrial
+      RLM (Registrierende Leistungsmessung) — large industrial, power plants
+
+    Data quality hierarchy per day:
+      Clearing (final, post-clearing period) → Corrected (M+12WD) → Allocation (D+1)
+    Recent months (~last 3 months) are at Allocation level (preliminary).
+
+    Units: kWh/day → TWh (÷ 1e9). History from January 2018.
+    """
+    country  = "DE"
+    source   = "Trading Hub Europe (THE) — aggregated consumption data"
+    method   = "direct"
+
+    API_URL  = ("https://api.tradinghub.eu/api/website/evoq/"
+                "GetAggregierteVerbrauchsdatenChart")
+    _HEADERS = {
+        **HEADERS,
+        "Referer": ("https://www.tradinghub.eu/en-gb/Publications/"
+                    "Further-Publications/Aggregated-Consumption-Data"),
+        "Accept":  "application/json",
+    }
+
+    def _fetch_month(self, year: int, month: int) -> list[dict]:
+        param = f"{month:02d}/{year}"
+        try:
+            r = requests.get(
+                self.API_URL,
+                params={"DatumStart": param},
+                headers=self._HEADERS,
+                timeout=30,
+            )
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            logger.warning(f"THE DE {param}: {e}")
+            return []
+
+    @staticmethod
+    def _day_twh(row: dict) -> float:
+        slp_h = (row.get("slP_Clearing_H") or row.get("slP_Corrected_H")
+                 or row.get("slP_Allocation_H") or 0)
+        slp_l = (row.get("slP_Clearing_L") or row.get("slP_Corrected_L")
+                 or row.get("slP_Allocation_L") or 0)
+        rlm_h = (row.get("rlM_Clearing_H") or row.get("rlM_Corrected_H")
+                 or row.get("rlM_Allocation_H") or 0)
+        rlm_l = (row.get("rlM_Clearing_L") or row.get("rlM_Corrected_L")
+                 or row.get("rlM_Allocation_L") or 0)
+        # Newer months use granular sub-fields when rollup fields are null
+        if slp_h == 0 and rlm_h == 0:
+            slp_h = (row.get("slPsyn_H_Gas") or 0) + (row.get("slPana_H_Gas") or 0)
+            slp_l = (row.get("slPsyn_L_Gas") or 0) + (row.get("slPana_L_Gas") or 0)
+            rlm_h = (row.get("rlMmT_H_Gas") or 0) + (row.get("rlMoT_H_Gas") or 0)
+            rlm_l = (row.get("rlMmT_L_Gas") or 0) + (row.get("rlMoT_L_Gas") or 0)
+        return (slp_h + slp_l + rlm_h + rlm_l) / 1e9
+
+    def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
+        records = []
+        # Iterate month by month
+        year, month = from_date.year, from_date.month
+        while (year, month) <= (to_date.year, to_date.month):
+            rows = self._fetch_month(year, month)
+            for row in rows:
+                gastag = row.get("gastag", "")[:10]
+                if not gastag:
+                    continue
+                try:
+                    d = date.fromisoformat(gastag)
+                except ValueError:
+                    continue
+                if d < from_date or d > to_date:
+                    continue
+                twh = self._day_twh(row)
+                if twh > 0:
+                    records.append({"date": d, "twh": twh})
+            # Advance to next month
+            if month == 12:
+                year, month = year + 1, 1
+            else:
+                month += 1
+            time.sleep(0.2)
+
+        if not records:
+            return pd.DataFrame()
+        df = pd.DataFrame(records)
+        return df.sort_values("date").reset_index(drop=True)
+
+
+# ── Greece — DESFA validated daily off-takes ──────────────────────────────────
+
+class GreeceDesfaExtractor(BaseExtractor):
+    """
+    Greece — validated daily gas off-takes from DESFA (Hellenic Gas Transmission
+    System Operator) public Excel file.
+
+    DESFA publishes Flows.xlsx on their transparency page — a rolling file that
+    covers 2008 to the most recent validated gas day. It contains all exit point
+    off-takes (kWh at 25°C combustion reference temperature) across both entry
+    points (Agia Triada, Kipi, Nea Mesimvria, Sidirokastro, Amfitriti) and
+    ~53 domestic off-take exit points (city gates, industrial consumers, CCGTs).
+
+    This replaces the ENTSOG Physical Flow approach (51 exit points) which was
+    missing unpublished domestic city-gate exits and undercounted by ~-37%.
+    DESFA's own metered totals are the authoritative source.
+
+    File: https://www.desfa.gr/wp-content/uploads/2024/08/Flows.xlsx
+    Sheet: kWh_25oC — rows 0–4 are header, row -1 is TOTAL; data rows 5 to -2.
+    Units: kWh (25°C GCV) → TWh (÷ 1e9).
+    """
+    country   = "GR"
+    source    = "DESFA (Hellenic Gas Transmission System Operator)"
+    method    = "direct"
+
+    FILE_URL  = "https://www.desfa.gr/wp-content/uploads/2024/08/Flows.xlsx"
+    SHEET     = "kWh_25oC"
+    _HEADERS  = {
+        **HEADERS,
+        "Referer": "https://www.desfa.gr/",
+    }
+
+    def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
+        try:
+            r = requests.get(self.FILE_URL, headers=self._HEADERS, timeout=90)
+            r.raise_for_status()
+        except Exception as e:
+            logger.warning(f"DESFA Flows.xlsx download: {e}")
+            return pd.DataFrame()
+
+        try:
+            xl   = pd.ExcelFile(BytesIO(r.content))
+            raw  = xl.parse(self.SHEET, header=None)
+
+            # Rows 0–4 = headers; last row = TOTAL aggregate — skip both ends
+            data = raw.iloc[5:-1].copy()
+            data.columns = range(len(data.columns))
+
+            # Column 0 = date, column 6 = NaN separator between entry/exit groups
+            # Exit (off-take) columns: 7 onward
+            data = data[pd.to_datetime(data[0], errors="coerce").notna()].copy()
+            data["date"] = pd.to_datetime(data[0]).dt.date
+
+            exit_cols = list(range(7, len(data.columns) - 1))  # -1: excludes 'date'
+            data["twh"] = (
+                data[exit_cols]
+                .apply(pd.to_numeric, errors="coerce")
+                .sum(axis=1) / 1e9
+            )
+
+            df = data[["date", "twh"]].copy()
+            df = df[(df["date"] >= from_date) & (df["date"] <= to_date)]
+            df = df[df["twh"] > 0]
+            return df.sort_values("date").reset_index(drop=True)
+        except Exception as e:
+            logger.warning(f"DESFA Flows.xlsx parse: {e}")
+            return pd.DataFrame()
 
 
 # ── Finland — Gasgrid transparency Excel ─────────────────────────────────────

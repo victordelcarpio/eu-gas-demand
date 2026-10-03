@@ -8,29 +8,29 @@ This document describes the data source used for each country in the pipeline: w
 
 | Country | Extractor type | Source | Granularity | Sector coverage | Own-use gap | History from | Lag |
 |---------|---------------|--------|-------------|-----------------|-------------|--------------|-----|
-| DE | National TSO API* | Trading Hub Europe (THE) | Daily | Total system (transmission) | ~3–5% | 2019 | D+1 |
+| DE | National TSO website API | Trading Hub Europe (THE) — public aggregated data | Daily | SLP (residential/commercial) + RLM (industrial/power) | ~3–5% | Jan 2018 | D+1 |
 | FR | National TSO API | ODRÉ / GRTGaz-TEREGA | Daily (half-hourly agg.) | Total system (trans. + dist.) | <1% | Jan 2012 | ~6 weeks (main); D+2 (sector fill) |
 | GB | National TSO API | National Gas operationaldata API | Daily | Total NTS demand | ~3–5% | ~2015 | D+1 |
 | IT | ENTSOG allocation | Snam Rete Gas — 3 points | Daily | Distribution + industrial + power | ~4–8% | ~2010 | D+1 |
 | ES | National TSO API | Enagas | Daily | Total national system | ~2–4% | ~2015 | D+2 |
-| CZ | National market op. | OTE (V0/V1 evaluation) | Daily | Total system | ~3–5% | ~2015 | D+3 (V0); M+16d (V1) |
+| CZ | ENTSOG Physical Flow | ENTSOG TP (NET4GAS) | Daily | Distribution + final consumers | ~5–10% | Jan 2025 | D+1 |
 | DK | National TSO API | Energi Data Service (Energinet) | Daily | Natural gas: transmission to distribution | <1% nat. gas†† | ~2012 | D+1 |
 | AT | National system op. | AGGM | Daily | Total system | ~3–5% | ~2019 | D+1 |
 | EE | National TSO API | Elering Dashboard | Hourly (agg. to daily) | Total domestic flow from transmission | ~2–3% | ~2015 | D+1 |
 | LT | National TSO API | Amber Grid open data | Daily | Distribution systems + directly connected | ~2–16% | Oct 2021 | D+1 |
 | NL | ENTSOG Physical Flow | ENTSOG TP / GTS (NL-TSO-0001) | Daily | Distribution + final consumers | ~3–5% | ~2012 | D+1 |
 | BE | ENTSOG Physical Flow | ENTSOG TP (Fluxys) | Daily | Distribution + industrial exit points | ~3–6% | ~2012 | D+1 |
-| PL | ENTSOG aggregated | ENTSOG TP | Daily | Aggregated exit (GAZ-SYSTEM) | ~3–6% | ~2012 | D+1 |
-| HU | ENTSOG aggregated | ENTSOG TP | Daily | Aggregated exit (FGSZ) | ~3–6% | ~2012 | D+1 |
-| RO | ENTSOG aggregated | ENTSOG TP | Daily | Aggregated exit (Transgaz) | ~3–6% | ~2012 | D+1 |
-| GR | ENTSOG aggregated | ENTSOG TP | Daily | Aggregated exit (DESFA) | ~3–6% | ~2012 | D+1 |
+| PL | ENTSOG Physical Flow | ENTSOG TP (GAZ-SYSTEM) | Daily | Aggregated distribution + final consumers (H/L gas) | ~10–12% | ~2012 | D+1 |
+| HU | ENTSOG Physical Flow | ENTSOG TP (FGSZ) | Daily | Aggregated distribution + final consumers | ~2–5% | ~2012 | D+1 |
+| RO | ENTSOG Physical Flow | ENTSOG TP (Transgaz) | Daily | Distribution + final consumers | ~5–10% | Jan 2021 | D+1 |
+| GR | National TSO Excel | DESFA — validated daily off-takes (Flows.xlsx) | Daily | All exit points: city gates + industrial + CCGT | <2% | Jan 2008 | ~weekly |
 | PT | National TSO API | REN Data Hub | Daily | Total national system | <1% | ~2015 | D+1 |
 | HR | National TSO API | Plinacro SUKAP | Daily | Total domestic consumption | ~3–5% | ~2020 | D+1 |
-| SI | ENTSOG aggregated | ENTSOG TP | Daily | Aggregated exit (Plinovodi) | ~3–6% | ~2012 | D+1 |
+| SI | ENTSOG Physical Flow | ENTSOG TP (Plinovodi) | Daily | Single distribution exit point (DIS-00059) | <2% | ~2012 | D+1 |
 | BG | ENTSOG Physical Flow | ENTSOG TP (Bulgartransgaz) | Daily | Main exit point (FNC-00207) | ~3–6% | Oct 2021 | D+1 |
 | SK | Flow-derived | ENTSOG TP (balance) | Daily | Net imports (no domestic prod.) | ~5–10% | ~2012 | D+1 |
-| LV | Flow-derived | ENTSOG TP (balance) | Daily | Net imports (no domestic prod.) | ~5–10% | ~2012 | D+1 |
-| SE | Flow-derived | ENTSOG TP (balance) | Daily | Net imports (no domestic prod.) | ~5–10% | ~2012 | D+1 |
+| LV | ENTSOG Physical Flow | ENTSOG TP (Conexus Baltic Grid) — FNC-00205 | Daily | Latvia domestic consumption exit point | ~3–6% | ~2015 | D+1 |
+| SE | Border flow | Energi Data Service (Energinet) — KWhToSweden | Daily | DK→SE cross-border flow (≈ consumption) | ~3–5% | 2018 | D+1 |
 | FI | National TSO Excel + flow-derived | Gasgrid Finland (Excel) + ALSI LNG | Daily | Total system (completed months from Excel; current month from LNG sendout) | ~2–5% hist.; ~5–10% current | ~2020 | M+1w hist.; D+1 current |
 
 †† Denmark gap vs Eurostat IC_OBS is intentional: Eurostat includes biomethane/biogas injected at DSO level; this pipeline tracks natural gas only. The Energinet Gasflow dataset covers natural gas through the transmission system and is the correct scope.
@@ -59,11 +59,13 @@ This is a structural limitation of the ENTSOG Transparency Platform data. It is 
 
 ### Germany (DE) — Trading Hub Europe
 
-**What**: THE aggregates all gas balancing zones in Germany into a single national demand figure. The API reports MWh/h (hourly average), which we convert to TWh/day (× 24 ÷ 10⁶).
+**What**: THE publishes daily aggregated SLP + RLM gas consumption data on their public website. The extractor uses the undocumented chart API endpoint at `api.tradinghub.eu/api/website/evoq/GetAggregierteVerbrauchsdatenChart`, requesting one month at a time. No authentication required.
 
-**Access**: As of mid-2025, THE moved consumption data behind an authenticated REST API. Requires a THE account and `THE_API_TOKEN` environment variable. Without it the extractor returns empty.
+**Fields**: SLP (Standardlastprofil) = residential + commercial + small industrial. RLM (Registrierende Leistungsmessung) = large industrial + power plants. Both H-Gas and L-Gas components are included. Data quality: Clearing (final) > Corrected (M+12WD) > Allocation (preliminary D+1) per day.
 
-**Coverage**: Full national transmission system. Includes industrial, power generation, and distribution system offtakes at the transmission/distribution interface.
+**Coverage**: Full national market area — all German balancing zones merged into THE in 2021. History from January 2018.
+
+**Note**: THE also operates an authenticated REST API (`api.tradinghub.eu/api/dataexport/`) which is not used here.
 
 ---
 
@@ -112,11 +114,17 @@ This is a structural limitation of the ENTSOG Transparency Platform data. It is 
 
 ---
 
-### Czech Republic (CZ) — OTE
+### Czech Republic (CZ) — ENTSOG Physical Flow (NET4GAS)
 
-**What**: OTE (Czech gas and electricity market operator) publishes daily ZIP files with gas evaluation data. V0 evaluation is published D+3 (provisional); V1 is published the 16th of the following month (more final). The extractor tries V1 first, falls back to V0.
+**What**: NET4GAS (Czech TSO, `CZ-TSO-0001`) publishes daily Physical Flow data on ENTSOG Transparency Platform via two aggregated exit points:
+- `DIS-00208` — Aggregated Distribution (CZ): gas delivered from transmission to distribution networks
+- `FNC-00215` — Aggregated Final Consumers (CZ): large industrial consumers directly connected to transmission
 
-**Coverage**: Total national system consumption. Daily ZIP per gas day.
+**History**: Available from January 2025 on ENTSOG TP. No pre-2025 data is recoverable: the old OTE ZIP URL was removed when OTE restructured their site in late 2024, and OTE's replacement aggregated imbalance Excel reports total system off-take (including cross-border transit), not domestic consumption.
+
+**Coverage**: Transmission allocation only. Annual 2025 total ~77.6 TWh vs Eurostat IC_OBS ~85 TWh (~8% gap — normal for ENTSOG allocation data, reflecting transmission own-use and unmetered small consumers).
+
+**Note**: CZ is a major transit country; off-take from the system includes export flows. The ENTSOG DIS/FNC points capture domestic consumption only, not transit.
 
 ---
 
@@ -182,6 +190,18 @@ The API is at `ambergrid.lt/en/lietuvos-suvartojimo-duomenu-skaiciuokle/755/sear
 
 ---
 
+### Greece (GR) — DESFA
+
+**What**: DESFA (Hellenic Gas Transmission System Operator) publishes a rolling Excel file (`Flows.xlsx`) with validated daily gas off-takes at all exit points from 2008 onward. The file is accessible without authentication and updated on an approximately weekly basis.
+
+**Coverage**: All exit points: ~5 entry interconnection points (Agia Triada/TAP, Kipi/IGB, Nea Mesimvria/TurkStream, Sidirokastro, Amfitriti/LNG terminal) and ~53 domestic off-take exits (city gates for distribution, large industrial consumers, CCGT power plants). This is DESFA's own metered system — it includes all exits that may not be individually reported to ENTSOG TP, explaining the -37% undercount seen when the 51-point ENTSOG approach was used.
+
+**Units**: kWh at 25°C combustion reference temperature → TWh (÷ 1e9).
+
+**Gap vs Eurostat**: Expected to be small (<2%) since DESFA's metered totals cover the full system. Some own-use gas (compression) may still be excluded.
+
+---
+
 ### Flow-derived (SK, LV, SE, FI)
 
 **What**: For countries with little or no domestic production and where no national TSO API is available, consumption is estimated from the net import balance: `entry flows − exit flows` from ENTSOG TP point-level data.
@@ -189,6 +209,8 @@ The API is at `ambergrid.lt/en/lietuvos-suvartojimo-duomenu-skaiciuokle/755/sear
 **Accuracy**: Less reliable than direct metered or allocation data. Sensitive to data gaps at individual cross-border points, unaccounted-for storage movements, and line-pack changes. Error vs Eurostat IC_OBS is typically 5–15% but can be larger for individual months.
 
 **Finland**: Uses a hybrid approach — ENTSOG pipeline flows plus LNG regasification from the Inkoo terminal.
+
+**Latvia (LV)**: Uses `FNC-00205` ("Latvia domestic consumption"), an ENTSOG aggregated Physical Flow exit point published by Conexus Baltic Grid (LV-TSO-0001). This is a dedicated domestic consumption point distinct from transit (Kimenai/Estonia) and storage (Incukalns UGS) flows. Latvia's annual consumption has declined from ~15 TWh (pre-2022) to ~8–9 TWh (post-2022 Russian gas disruption). The previous flow-derived approach severely undercounted (~3 TWh) because it was using balance flows that don't correctly subtract storage movements.
 
 ---
 
