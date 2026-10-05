@@ -39,7 +39,7 @@ from extractors.national import (
     FinlandGasgridExtractor,
 )
 from extractors.entsog import ENTSOGDirectExtractor, ENTSOGPhysicalFlowExtractor
-from extractors.flow_derived import FlowDerivedExtractor, FinlandLNGExtractor
+from extractors.flow_derived import SlovakiaExtractor, FlowDerivedExtractor, FinlandLNGExtractor
 
 logging.basicConfig(
     level=logging.INFO,
@@ -89,7 +89,7 @@ def _build_extractors():
         ENTSOGPhysicalFlowExtractor("BG", ["FNC-00207"],
                                     history_from=date(2021, 10, 1)),
         # Flow-derived — zero domestic production
-        FlowDerivedExtractor("SK"),
+        SlovakiaExtractor(),  # ENTSOG aggregated balance + AGSI storage (GIE_AGSI_API_KEY)
         ENTSOGPhysicalFlowExtractor("LV", ["FNC-00205"]),  # Latvia domestic consumption exit point
         LithuaniaAmberGridExtractor(),
         EstoniaEleringExtractor(),
