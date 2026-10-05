@@ -28,7 +28,7 @@ This document describes the data source used for each country in the pipeline: w
 | HR | National TSO API | Plinacro SUKAP | Daily | Total domestic consumption | ~3–5% | ~2020 | D+1 |
 | SI | ENTSOG Physical Flow | ENTSOG TP (Plinovodi) | Daily | Single distribution exit point (DIS-00059) | <2% | ~2012 | D+1 |
 | BG | ENTSOG Physical Flow | ENTSOG TP (Bulgartransgaz) | Daily | Main exit point (FNC-00207) | ~3–6% | Oct 2021 | D+1 |
-| SK | Flow-derived | ENTSOG TP (balance) | Daily | Net imports (no domestic prod.) | ~5–10% | ~2012 | D+1 |
+| SK | ENTSOG aggregated + AGSI | ENTSOG aggregated border balance + AGSI storage correction | Daily | Net imports ± storage change | ~10–20%* | ~2020 | D+1 |
 | LV | ENTSOG Physical Flow | ENTSOG TP (Conexus Baltic Grid) — FNC-00205 | Daily | Latvia domestic consumption exit point | ~3–6% | ~2015 | D+1 |
 | SE | Border flow | Energi Data Service (Energinet) — KWhToSweden | Daily | DK→SE cross-border flow (≈ consumption) | ~3–5% | 2018 | D+1 |
 | FI | National TSO Excel + flow-derived | Gasgrid Finland (Excel) + ALSI LNG | Daily | Total system (completed months from Excel; current month from LNG sendout) | ~2–5% hist.; ~5–10% current | ~2020 | M+1w hist.; D+1 current |
@@ -202,11 +202,29 @@ The API is at `ambergrid.lt/en/lietuvos-suvartojimo-duomenu-skaiciuokle/755/sear
 
 ---
 
-### Flow-derived (SK, LV, SE, FI)
+### Slovakia (SK) — ENTSOG aggregated balance + AGSI storage
 
-**What**: For countries with little or no domestic production and where no national TSO API is available, consumption is estimated from the net import balance: `entry flows − exit flows` from ENTSOG TP point-level data.
+**What**: Slovakia is a major transit hub with large storage facilities (POZAGAS + NAFTA, ~37 TWh working gas volume). Point-level ENTSOG border flows cannot be used for SK because transit points report identical entry/exit values, causing all transit to cancel out (net=0 for transit). Instead the extractor uses ENTSOG's `/aggregatedData` endpoint which correctly attributes directional flows by neighbor country.
 
-**Accuracy**: Less reliable than direct metered or allocation data. Sensitive to data gaps at individual cross-border points, unaccounted-for storage movements, and line-pack changes. Error vs Eurostat IC_OBS is typically 5–15% but can be larger for individual months.
+**Formula**: `consumption = net_border_import + (storage_withdrawal − storage_injection)`
+
+The ENTSOG aggregated net import includes gas that entered from neighboring TSOs and went into storage (because it didn't exit at another border crossing). The AGSI storage correction (`GIE_AGSI_API_KEY` env var, free registration) subtracts net injection / adds net withdrawal to isolate domestic consumption.
+
+**Without AGSI key**: The seasonal pattern is systematically biased — summer overestimates consumption (storage injection inflates net import), winter underestimates (storage withdrawal reduces apparent net import). **Set `GIE_AGSI_API_KEY` for reasonable year-round accuracy.**
+
+**Why not point-level flows**: The Velké Kapušany UA-SK entry (historically the dominant import route) ceased in Jan 2025 when Russia stopped Ukrainian transit. Now Slovakia imports from AT, CZ, HU at bidirectional ITP points — which report equal entry/exit values in point-level data, netting to zero. Only aggregated data correctly disaggregates these.
+
+**Gap vs Eurostat**: ~10–20% depending on season and whether AGSI correction is applied. The gap includes transmission own-use and potential uncaptured domestic production.
+
+**History**: ENTSOG aggregated data for SK is available from approximately 2020. Pre-2020 data should not be used for SK without validation.
+
+---
+
+### Flow-derived (LV, SE, FI)
+
+**What**: For countries with little or no domestic production and where no national TSO API is available, consumption is estimated from the net border balance from ENTSOG TP point-level data. Storage interconnection points (`UGS-*` prefix) are excluded from the border balance.
+
+**Accuracy**: Less reliable than direct metered or allocation data. Sensitive to data gaps at individual cross-border points and line-pack changes. Error vs Eurostat IC_OBS is typically 5–15% but can be larger for individual months.
 
 **Finland**: Uses a hybrid approach — ENTSOG pipeline flows plus LNG regasification from the Inkoo terminal.
 

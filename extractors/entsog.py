@@ -54,17 +54,28 @@ def _query(endpoint: str, params: dict, timeout: int = 60) -> dict:
         raise RuntimeError(f"ENTSOG error: {e}")
 
 
-def _get_border_point_keys(country: str) -> dict[str, list[str]]:
+def _get_border_point_keys(
+    country: str,
+    include_storage: bool = False,
+) -> dict[str, list[str]]:
     """
     Query /interconnections to find the border point keys for a country.
     Returns {"entry": [pointKeys...], "exit": [pointKeys...]}.
     Entry = points where gas flows INTO the country.
     Exit  = points where gas flows OUT OF the country.
     Only includes Transmission and LNG infrastructure types with data.
+
+    include_storage: if True also includes UGS-* point keys.
+    Set to False (default) for flow-derived countries where storage changes are
+    handled separately via AGSI — including storage here would double-count.
+    Note: ENTSOG labels UGS interconnection points as "Transmission", so we
+    also filter by the UGS- prefix in the point key itself.
     """
     entsog_code = ENTSOG_COUNTRY_MAP.get(country)
     if not entsog_code:
         return {"entry": [], "exit": []}
+
+    infra_filter = {"Transmission", "LNG"}
 
     entry_keys = []
     exit_keys = []
@@ -77,11 +88,13 @@ def _get_border_point_keys(country: str) -> dict[str, list[str]]:
             "format": "json",
         })
         for ic in data.get("interconnections", []):
-            infra = ic.get("fromInfrastructureTypeLabel", "")
+            infra = ic.get("fromInfrastructureTypeLabel", "") or ""
             has_data = ic.get("fromHasData", False)
-            pk = ic.get("fromPointKey")
-            if pk and has_data and ("Transmission" in infra or "LNG" in infra or "Storage" in infra):
-                exit_keys.append(pk)
+            pk = ic.get("fromPointKey") or ""
+            is_storage_point = pk.startswith("UGS-")
+            if pk and has_data and any(t in infra for t in infra_filter):
+                if not is_storage_point or include_storage:
+                    exit_keys.append(pk)
     except Exception as e:
         logger.warning(f"ENTSOG interconnections (exit) for {country}: {e}")
 
@@ -93,11 +106,13 @@ def _get_border_point_keys(country: str) -> dict[str, list[str]]:
             "format": "json",
         })
         for ic in data.get("interconnections", []):
-            infra = ic.get("toInfrastructureTypeLabel", "")
+            infra = ic.get("toInfrastructureTypeLabel", "") or ""
             has_data = ic.get("toHasData", False)
-            pk = ic.get("toPointKey")
-            if pk and has_data and ("Transmission" in infra or "LNG" in infra or "Storage" in infra):
-                entry_keys.append(pk)
+            pk = ic.get("toPointKey") or ""
+            is_storage_point = pk.startswith("UGS-")
+            if pk and has_data and any(t in infra for t in infra_filter):
+                if not is_storage_point or include_storage:
+                    entry_keys.append(pk)
     except Exception as e:
         logger.warning(f"ENTSOG interconnections (entry) for {country}: {e}")
 
@@ -171,15 +186,14 @@ def fetch_border_flows(
     to_date: date,
 ) -> dict[str, pd.DataFrame]:
     """
-    Fetch entry and exit physical flows at border points for a country.
+    Fetch entry and exit physical flows at BORDER (cross-border Transmission + LNG) points.
     Returns {"entry": df, "exit": df} with daily TWh.
     Used by flow_derived.py for mass-balance countries.
 
-    Two-step approach:
-      1. Query /interconnections to discover border point keys.
-      2. Query /operationalData for each point with Physical Flow indicator.
+    Storage interconnections are intentionally excluded (include_storage=False) because
+    storage changes are accounted for separately via AGSI, not via ENTSOG border balance.
     """
-    point_keys = _get_border_point_keys(country)
+    point_keys = _get_border_point_keys(country, include_storage=False)
 
     result = {}
     for direction in ["entry", "exit"]:
