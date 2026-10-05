@@ -21,19 +21,21 @@ import pandas as pd
 BASELINE_CACHE_PATH = Path("output/baseline_cache.csv")
 
 from extractors.national import (
-    GermanyTHEExtractor,
+    GermanyTHEWebExtractor,
     FranceGRTGazExtractor,
     UKNationalGasExtractor,
     ItalySnamExtractor,
     SpainEnagasExtractor,
     CzechOTEExtractor,
     DenmarkEnergiDataExtractor,
+    SwedenEnergidataExtractor,
     AustriaAGGMExtractor,
     EstoniaEleringExtractor,
     LithuaniaAmberGridExtractor,
     NetherlandsGTSExtractor,
     PortugalRENExtractor,
     CroatiaPlinacroExtractor,
+    GreeceDesfaExtractor,
     FinlandGasgridExtractor,
 )
 from extractors.entsog import ENTSOGDirectExtractor, ENTSOGPhysicalFlowExtractor
@@ -50,7 +52,7 @@ logger = logging.getLogger(__name__)
 def _build_extractors():
     return [
         # Direct — national TSOs / market operators
-        GermanyTHEExtractor(),
+        GermanyTHEWebExtractor(),  # daily SLP+RLM, public website API (no auth required)
         FranceGRTGazExtractor(),
         UKNationalGasExtractor(),
         ItalySnamExtractor(),
@@ -64,21 +66,34 @@ def _build_extractors():
             "DIS-00191", "DIS-00192",            # Fluxys exit to distribution
             "FNC-00033", "FNC-00034", "FNC-00035",  # large industrial / power
         ]),
-        ENTSOGDirectExtractor("PL"),
-        ENTSOGDirectExtractor("HU"),
-        FlowDerivedExtractor("RO"),
-        ENTSOGDirectExtractor("GR"),
+        ENTSOGPhysicalFlowExtractor("PL", [
+            "DIS-00013", "DIS-00193",   # Aggregated Distribution H-gas / L-gas
+            "FNC-00002", "FNC-00040",   # Final Consumers H-gas / L-gas
+        ]),
+        ENTSOGPhysicalFlowExtractor("HU", [
+            "DIS-00196",   # Aggregated Distribution (HU)
+            "FNC-00200",   # Aggregated Final Consumers (HU)
+        ]),
+        ENTSOGPhysicalFlowExtractor("RO", [
+            "DIS-00058",   # Transgaz delivery to distribution networks
+            "FNC-00010",   # Transgaz delivery to large final consumers
+        ]),
+        GreeceDesfaExtractor(),  # DESFA validated daily off-takes — full metered system
         PortugalRENExtractor(),
         CroatiaPlinacroExtractor(),
-        ENTSOGDirectExtractor("SI"),
+        ENTSOGPhysicalFlowExtractor("CZ", [
+            "DIS-00208",   # Aggregated Distribution (CZ) — gas to DSOs
+            "FNC-00215",   # Aggregated Final Consumers (CZ) — direct-connected industrial
+        ]),
+        ENTSOGPhysicalFlowExtractor("SI", ["DIS-00059"]),
         ENTSOGPhysicalFlowExtractor("BG", ["FNC-00207"],
                                     history_from=date(2021, 10, 1)),
         # Flow-derived — zero domestic production
         FlowDerivedExtractor("SK"),
-        FlowDerivedExtractor("LV"),
+        ENTSOGPhysicalFlowExtractor("LV", ["FNC-00205"]),  # Latvia domestic consumption exit point
         LithuaniaAmberGridExtractor(),
         EstoniaEleringExtractor(),
-        FlowDerivedExtractor("SE"),
+        SwedenEnergidataExtractor(),
         FinlandGasgridExtractor(),   # direct (Excel); falls back to LNG below
         FinlandLNGExtractor(),       # flow-derived fallback for current month
     ]
