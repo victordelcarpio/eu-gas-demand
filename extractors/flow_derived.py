@@ -27,6 +27,12 @@ import logging
 from .base import BaseExtractor
 from .entsog import fetch_border_flows
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 logger = logging.getLogger(__name__)
 
 AGSI_BASE = "https://agsi.gie.eu/api"
