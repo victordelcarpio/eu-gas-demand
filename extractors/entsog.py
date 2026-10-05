@@ -14,6 +14,7 @@ API notes (verified Sep 2026):
 """
 
 from datetime import date
+import time
 import pandas as pd
 import requests
 import logging
@@ -38,20 +39,35 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; gas-demand-pipeline/1.0; research use)"
 }
 
+_RETRY_DELAYS = [15, 30, 60]  # seconds between retries on 429
+
 
 def _query(endpoint: str, params: dict, timeout: int = 60) -> dict:
-    """Raw ENTSOG API call with error handling."""
+    """Raw ENTSOG API call with retry on 429 (rate limit)."""
     url = f"{ENTSOG_BASE}/{endpoint}"
-    try:
-        r = requests.get(url, params=params, headers=HEADERS, timeout=timeout)
-        r.raise_for_status()
-        return r.json()
-    except requests.exceptions.Timeout:
-        raise RuntimeError(f"ENTSOG timeout on {endpoint}")
-    except requests.exceptions.HTTPError as e:
-        raise RuntimeError(f"ENTSOG HTTP {e.response.status_code} on {endpoint}")
-    except Exception as e:
-        raise RuntimeError(f"ENTSOG error: {e}")
+    for attempt, delay in enumerate([0] + _RETRY_DELAYS):
+        if delay:
+            logger.info(f"ENTSOG 429 on {endpoint} — retrying in {delay}s (attempt {attempt+1})")
+            time.sleep(delay)
+        try:
+            r = requests.get(url, params=params, headers=HEADERS, timeout=timeout)
+            if r.status_code == 429:
+                retry_after = int(r.headers.get("Retry-After", delay or 15))
+                if attempt < len(_RETRY_DELAYS):
+                    time.sleep(max(retry_after, _RETRY_DELAYS[attempt]))
+                    continue
+                raise RuntimeError(f"ENTSOG 429 on {endpoint} after {len(_RETRY_DELAYS)} retries")
+            r.raise_for_status()
+            return r.json()
+        except requests.exceptions.Timeout:
+            raise RuntimeError(f"ENTSOG timeout on {endpoint}")
+        except requests.exceptions.HTTPError as e:
+            raise RuntimeError(f"ENTSOG HTTP {e.response.status_code} on {endpoint}")
+        except RuntimeError:
+            raise
+        except Exception as e:
+            raise RuntimeError(f"ENTSOG error: {e}")
+    raise RuntimeError(f"ENTSOG {endpoint}: exhausted retries")
 
 
 def _get_border_point_keys(
