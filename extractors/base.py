@@ -8,6 +8,13 @@ Every extractor returns a DataFrame with exactly these columns:
     source      : str                 — human-readable source label
     provisional : bool                — True if data may be revised
     method      : str                 — "direct" | "flow_derived"
+    source_type : str                 — "full_metered" | "transmission_allocation" | "flow_derived"
+
+source_type values:
+    full_metered           — national TSO reports fully metered system consumption
+    transmission_allocation — ENTSOG exit-point allocation (DIS-/FNC- points); covers most
+                              but not all end-use (some industrial consumers may bypass TSO)
+    flow_derived           — mass balance (imports − exports ± storage); less precise
 """
 
 from abc import ABC, abstractmethod
@@ -17,7 +24,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA = ["date", "country", "twh", "source", "provisional", "method"]
+SCHEMA = ["date", "country", "twh", "source", "provisional", "method", "source_type"]
 
 # Provisional flag: any data within this many days of today is marked provisional
 PROVISIONAL_LAG_DAYS = {
@@ -36,9 +43,10 @@ PROVISIONAL_LAG_DAYS = {
 
 
 class BaseExtractor(ABC):
-    country: str       # ISO2
-    source:  str       # display label
-    method:  str = "direct"
+    country:     str       # ISO2
+    source:      str       # display label
+    method:      str = "direct"
+    source_type: str = "full_metered"
 
     def fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
         """
@@ -68,6 +76,7 @@ class BaseExtractor(ABC):
         df["country"]     = self.country
         df["source"]      = self.source
         df["method"]      = self.method
+        df["source_type"] = self.source_type
         df["twh"]         = pd.to_numeric(df["twh"], errors="coerce")
         df["provisional"] = df.get("provisional", False)
         df = df.dropna(subset=["date", "twh"])

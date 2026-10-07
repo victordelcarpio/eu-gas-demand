@@ -184,7 +184,7 @@ def run(
     Run all extractors in parallel, merge results, return daily data + coverage.
 
     Args:
-        from_date     : start of the period of interest (default: 12 months ago)
+        from_date     : start of the period of interest (default: 2025-01-01)
         to_date       : end of the period of interest (default: yesterday)
         baseline_from : start of baseline period
         baseline_to   : end of baseline period
@@ -192,13 +192,13 @@ def run(
 
     Returns:
         (df, coverage)
-        df       : daily [date, country, twh, source, provisional, method]
+        df       : daily [date, country, twh, bcm, source, provisional, method]
         coverage : list of per-country dicts for appendix/footer
     """
     if to_date is None:
         to_date = date.today() - timedelta(days=1)
     if from_date is None:
-        from_date = date(to_date.year - 1, to_date.month, 1)
+        from_date = date(2025, 1, 1)
 
     logger.info(f"Pipeline run: {from_date} → {to_date}")
     logger.info(f"Baseline:     {baseline_from} → {baseline_to}")
@@ -270,6 +270,8 @@ def run(
         .drop_duplicates(subset=["date", "country"], keep="first")
         .drop(columns="method_rank")
     )
+
+    combined["bcm"] = (combined["twh"] / 10.564).round(6)
 
     # Split into recent and baseline
     recent_df   = combined[combined["date"] >= from_date].copy()

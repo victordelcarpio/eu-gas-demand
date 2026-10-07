@@ -230,7 +230,8 @@ class ENTSOGDirectExtractor(BaseExtractor):
     Placeholder for countries not yet wired up with specific point keys.
     Returns empty DataFrames — used only as a registry stub.
     """
-    method = "direct"
+    method      = "direct"
+    source_type = "transmission_allocation"
 
     def __init__(self, country: str):
         self.country = country
@@ -256,7 +257,8 @@ class ENTSOGPhysicalFlowExtractor(BaseExtractor):
     This replaces the defunct /AggregatedData endpoint for countries where we
     know the relevant set of consumption exit points.
     """
-    method = "direct"
+    method      = "direct"
+    source_type = "transmission_allocation"
 
     def __init__(self, country: str, point_keys: list[str], history_from: date | None = None):
         self.country      = country

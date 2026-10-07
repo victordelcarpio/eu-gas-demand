@@ -494,10 +494,12 @@ class SpainEnagasExtractor(BaseExtractor):
         "/energy-data/demanda/historico/jcr:content/responsiveGrid"
         "/container_copy_19796/realdemand_copy_copy.realdemand.json"
     )
-    WINDOW_DAYS = 60   # 60-day step + up to 14-day retry = 74 days covered per window,
-                       # ensuring no gap even in the worst case (next window ≥ 60 days back).
+    WINDOW_DAYS  = 60   # 60-day step + up to 14-day retry = 74 days covered per window,
+                        # ensuring no gap even in the worst case (next window ≥ 60 days back).
+    HISTORY_FROM = date(2023, 1, 1)  # API returns no data for dates before 2023
 
     def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
+        from_date = max(from_date, self.HISTORY_FROM)
         # Use a dict keyed by date string to prevent double-counting when
         # overlapping windows return the same date (last write wins, which is fine
         # since Enagas returns the same value for a given date regardless of anchor).
@@ -648,7 +650,8 @@ class SwedenEnergidataExtractor(BaseExtractor):
     No Swedish domestic production exists, so net border flow ≈ consumption.
     The storage component is small (~1–3% of consumption). History from 2018.
     """
-    country = "SE"
+    country     = "SE"
+    source_type = "flow_derived"
     source  = "Energi Data Service (Energinet) — KWhToSweden"
     method  = "flow_derived"
 
@@ -875,8 +878,9 @@ class NetherlandsGTSExtractor(BaseExtractor):
     Own-use gap vs Eurostat IC_OBS is expected at ~4–8% (compression fuel,
     line-pack, unaccounted-for gas not reported via Physical Flow).
     """
-    country = "NL"
-    source  = "ENTSOG / GTS (Gasunie Transport Services)"
+    country     = "NL"
+    source      = "ENTSOG / GTS (Gasunie Transport Services)"
+    source_type = "transmission_allocation"
 
     ENTSOG_BASE      = "https://transparency.entsog.eu/api/v1"
     OPERATOR_KEY     = "NL-TSO-0001"
