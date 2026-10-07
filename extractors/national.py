@@ -1002,25 +1002,32 @@ class CroatiaPlinacroExtractor(BaseExtractor):
     API_URL  = "https://www.sukap.plinacro.hr/pub/consumption/search"
 
     def _fetch_day(self, d: date):
-        try:
-            r = requests.post(
-                self.API_URL,
-                json={"gasDay": f"{d.isoformat()}T00:00:00"},
-                headers={**HEADERS, "Content-Type": "application/json"},
-                timeout=30,
-            )
-            r.raise_for_status()
-            values = r.json().get("data", {}).get("values", [])
-            if not values:
+        for attempt in range(3):
+            try:
+                r = requests.post(
+                    self.API_URL,
+                    json={"gasDay": f"{d.isoformat()}T00:00:00"},
+                    headers={**HEADERS, "Content-Type": "application/json"},
+                    timeout=30,
+                )
+                r.raise_for_status()
+                values = r.json().get("data", {}).get("values", [])
+                if not values:
+                    return None
+                last = max(values, key=lambda v: v.get("gasHour", -1))
+                cumulative = last.get("cumulativeCapacity")
+                if cumulative is None or cumulative <= 0:
+                    return None
+                return {"date": d, "twh": float(cumulative) / 1e9}
+            except requests.exceptions.ConnectionError as e:
+                if attempt < 2:
+                    time.sleep(5 * (attempt + 1))
+                    continue
+                logger.warning(f"Plinacro HR {d}: {e}")
                 return None
-            last = max(values, key=lambda v: v.get("gasHour", -1))
-            cumulative = last.get("cumulativeCapacity")
-            if cumulative is None or cumulative <= 0:
+            except Exception as e:
+                logger.warning(f"Plinacro HR {d}: {e}")
                 return None
-            return {"date": d, "twh": float(cumulative) / 1e9}
-        except Exception as e:
-            logger.warning(f"Plinacro HR {d}: {e}")
-            return None
 
     def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
         all_dates = []

@@ -84,7 +84,7 @@ def _build_extractors():
         ENTSOGPhysicalFlowExtractor("CZ", [
             "DIS-00208",   # Aggregated Distribution (CZ) — gas to DSOs
             "FNC-00215",   # Aggregated Final Consumers (CZ) — direct-connected industrial
-        ]),
+        ], history_from=date(2025, 1, 1)),
         ENTSOGPhysicalFlowExtractor("SI", ["DIS-00059"]),
         ENTSOGPhysicalFlowExtractor("BG", ["FNC-00207"],
                                     history_from=date(2021, 10, 1)),
