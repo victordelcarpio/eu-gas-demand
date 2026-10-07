@@ -650,7 +650,8 @@ class SwedenEnergidataExtractor(BaseExtractor):
     No Swedish domestic production exists, so net border flow ≈ consumption.
     The storage component is small (~1–3% of consumption). History from 2018.
     """
-    country = "SE"
+    country     = "SE"
+    source_type = "flow_derived"
     source  = "Energi Data Service (Energinet) — KWhToSweden"
     method  = "flow_derived"
 
@@ -877,8 +878,9 @@ class NetherlandsGTSExtractor(BaseExtractor):
     Own-use gap vs Eurostat IC_OBS is expected at ~4–8% (compression fuel,
     line-pack, unaccounted-for gas not reported via Physical Flow).
     """
-    country = "NL"
-    source  = "ENTSOG / GTS (Gasunie Transport Services)"
+    country     = "NL"
+    source      = "ENTSOG / GTS (Gasunie Transport Services)"
+    source_type = "transmission_allocation"
 
     ENTSOG_BASE      = "https://transparency.entsog.eu/api/v1"
     OPERATOR_KEY     = "NL-TSO-0001"

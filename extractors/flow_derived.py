@@ -148,9 +148,10 @@ class SlovakiaExtractor(BaseExtractor):
     storage drawdown (POZAGAS + NAFTA combined). Without the key, summer values will
     be understated because the border balance alone undercounts when injection > entry.
     """
-    country = "SK"
-    source  = "ENTSOG aggregated balance + AGSI storage (SK)"
-    method  = "flow_derived"
+    country     = "SK"
+    source      = "ENTSOG aggregated balance + AGSI storage (SK)"
+    method      = "flow_derived"
+    source_type = "flow_derived"
 
     ENTSOG_AGG = "https://transparency.entsog.eu/api/v1/aggregatedData"
     _HEADERS   = {"User-Agent": "Mozilla/5.0 (compatible; gas-demand-pipeline/1.0; research use)"}
@@ -224,7 +225,8 @@ class FlowDerivedExtractor(BaseExtractor):
     Used for: SE (border-only), FI (pre-LNG).
     For SK use SlovakiaExtractor instead.
     """
-    method = "flow_derived"
+    method      = "flow_derived"
+    source_type = "flow_derived"
 
     def __init__(self, country: str):
         self.country = country
@@ -263,9 +265,10 @@ class FinlandLNGExtractor(BaseExtractor):
     Inkoo and Hamina terminals. Use ALSI sendout as consumption proxy.
     Also adds any residual pipeline flows from ENTSOG (small).
     """
-    country = "FI"
-    source  = "ALSI LNG sendout + ENTSOG (FI)"
-    method  = "flow_derived"
+    country     = "FI"
+    source      = "ALSI LNG sendout + ENTSOG (FI)"
+    method      = "flow_derived"
+    source_type = "flow_derived"
 
     def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
         dates = pd.date_range(from_date, to_date, freq="D")
