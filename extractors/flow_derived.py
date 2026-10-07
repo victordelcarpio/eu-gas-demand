@@ -104,6 +104,9 @@ def _fetch_agsi_country_storage(country_code: str, from_date: date, to_date: dat
     return df
 
 
+_ALSI_RETRY_DELAYS = [15, 30]
+
+
 def _fetch_alsi_sendout(eic: str, from_date: date, to_date: date) -> pd.DataFrame:
     """Fetch LNG sendout (regasification) from ALSI in TWh/day."""
     params = {
@@ -114,12 +117,23 @@ def _fetch_alsi_sendout(eic: str, from_date: date, to_date: date) -> pd.DataFram
         "size":   500,
         "format": "json",
     }
-    try:
-        r = requests.get(ALSI_BASE, params=params, timeout=30)
-        r.raise_for_status()
-        data = r.json()
-    except Exception as e:
-        logger.warning(f"ALSI sendout fetch failed for {eic}: {e}")
+    import time
+    for attempt, delay in enumerate([0] + _ALSI_RETRY_DELAYS):
+        if delay:
+            logger.info(f"ALSI retry for {eic} in {delay}s (attempt {attempt+1})")
+            time.sleep(delay)
+        try:
+            r = requests.get(ALSI_BASE, params=params, timeout=60)
+            r.raise_for_status()
+            data = r.json()
+            break
+        except Exception as e:
+            if attempt < len(_ALSI_RETRY_DELAYS):
+                logger.debug(f"ALSI sendout {eic} attempt {attempt+1}: {e}")
+                continue
+            logger.warning(f"ALSI sendout fetch failed for {eic}: {e}")
+            return pd.DataFrame()
+    else:
         return pd.DataFrame()
 
     rows = data.get("data", [])
