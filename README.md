@@ -5,28 +5,36 @@ built from primary national TSO and market operator sources.
 
 ## Sources
 
-| Country | Source | Method | Lag |
-|---------|--------|--------|-----|
-| Germany | Trading Hub Europe (THE) | Direct | D-1 |
-| France | GRTGaz | Direct | D-3 to D-5 |
-| UK | National Gas / Xoserve | Direct | D-1 |
-| Italy | Snam Rete Gas | Direct | D-2 |
-| Spain | Enagas | Direct | D-2 |
-| Czech Republic | OTE (V0 evaluation) | Direct | D-3 |
-| Denmark | Energi Data Service | Direct | D-1 |
-| Austria | AGGM | Direct | D-2 |
-| Netherlands | ENTSOG | Direct | D-2 |
-| Belgium, Poland, Hungary, Romania, Greece, Portugal, Croatia, Slovenia, Bulgaria | ENTSOG | Direct | D-2 |
-| Slovakia | ENTSOG border flows + AGSI+ storage | Flow-derived | D-2 |
-| Latvia | ENTSOG border flows + AGSI+ (Inčukalns) | Flow-derived | D-2 |
-| Lithuania | ENTSOG border flows + ALSI (Klaipeda LNG) | Flow-derived | D-2 |
-| Estonia | ENTSOG border flows | Flow-derived | D-2 |
-| Finland | ALSI (Inkoo + Hamina LNG) + ENTSOG | Flow-derived | D-2 |
-| Sweden | ENTSOG border flows (single DK point) | Flow-derived | D-2 |
+| Country | Source | `source_type` | Lag |
+|---------|--------|---------------|-----|
+| Germany | Trading Hub Europe (THE) | `full_metered` | D-1 |
+| France | GRTGaz | `full_metered` | D-3 to D-5 |
+| UK | National Gas / Xoserve | `full_metered` | D-1 |
+| Italy | Snam Rete Gas | `full_metered` | D-2 |
+| Spain | Enagas (from 2023-01-01) | `full_metered` | D-2 |
+| Czech Republic | OTE (V0 evaluation) | `full_metered` | D-3 |
+| Denmark | Energi Data Service | `full_metered` | D-1 |
+| Austria | AGGM | `full_metered` | D-2 |
+| Lithuania | Amber Grid open data | `full_metered` | D-2 |
+| Estonia | Elering dashboard | `full_metered` | D-2 |
+| Finland | Gasgrid transparency Excel | `full_metered` | D-2 |
+| Greece | DESFA validated off-takes | `full_metered` | D-3 |
+| Portugal | REN Data Hub | `full_metered` | D-2 |
+| Croatia | Plinacro SUKAP | `full_metered` | D-2 |
+| Netherlands | ENTSOG / GTS Physical Flow | `transmission_allocation` | D-2 |
+| Belgium, Poland, Hungary, Romania, Slovenia, Bulgaria | ENTSOG Physical Flow (DIS-/FNC- points) | `transmission_allocation` | D-2 |
+| Latvia | ENTSOG Physical Flow (FNC-00205) | `transmission_allocation` | D-2 |
+| Slovakia | ENTSOG aggregated balance + AGSI storage | `flow_derived` | D-2 |
+| Finland (fallback) | ALSI LNG sendout (Inkoo + Hamina) + ENTSOG | `flow_derived` | D-2 |
+| Sweden | Energinet Gasflow (DK→SE border) | `flow_derived` | D-2 |
 
-**Flow-derived methodology:** For zero-production countries, consumption is estimated
-as `Σ(border entries) − Σ(cross-border exits) ± storage change`. Mass balance is
-essentially exact for these countries due to zero domestic production.
+### `source_type` values
+
+| Value | Meaning |
+|-------|---------|
+| `full_metered` | National TSO reports fully metered system consumption |
+| `transmission_allocation` | ENTSOG Physical Flow exit points (DIS-/FNC-); covers most but not all end-use |
+| `flow_derived` | Mass balance (imports − exports ± storage) or LNG sendout proxy |
 
 **Provisional flag:** Any data within the source's typical revision lag is marked
 provisional. V0 OTE data for Czech Republic is always provisional until V1 is published
@@ -51,7 +59,7 @@ npm install pptxgenjs
 ## Usage
 
 ```bash
-# Run with defaults (last 12 months, output to ./output/)
+# Run with defaults (2025-01-01 to yesterday, output to ./output/)
 python run.py
 
 # Custom date range
@@ -71,7 +79,7 @@ python run.py --workers 10
 
 ```
 output/
-├── eu_gas_demand_daily.csv    # daily rows: date, country, twh, source, provisional, method
+├── eu_gas_demand_daily.csv    # daily rows: date, country, twh, bcm, source, provisional, method, source_type
 ├── eu_gas_demand_monthly.csv  # monthly aggregated
 ├── coverage_report.csv        # per-country coverage summary
 └── eu_gas_demand.pptx         # two-chart slide
@@ -95,7 +103,7 @@ gas_demand/
 ## Adding a new source
 
 1. Create a class in `extractors/national.py` (or a new file) inheriting `BaseExtractor`
-2. Set `country`, `source`, and optionally `method`
+2. Set `country`, `source`, and optionally `method` and `source_type` (default: `"full_metered"`)
 3. Implement `_fetch(from_date, to_date) -> pd.DataFrame`
    - Return DataFrame with columns: `date`, `twh`, and optionally `provisional`
    - The base class handles validation, schema enforcement, and provisional flagging
