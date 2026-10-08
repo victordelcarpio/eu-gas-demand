@@ -42,12 +42,15 @@ HEADERS = {
 _RETRY_DELAYS = [15, 30, 60]  # seconds between retries on 429
 
 
+_TRANSIENT_5XX = {502, 503, 504}
+
+
 def _query(endpoint: str, params: dict, timeout: int = 60) -> dict:
-    """Raw ENTSOG API call with retry on 429 (rate limit)."""
+    """Raw ENTSOG API call with retry on 429 (rate limit) and 502/503/504 (transient)."""
     url = f"{ENTSOG_BASE}/{endpoint}"
     for attempt, delay in enumerate([0] + _RETRY_DELAYS):
         if delay:
-            logger.info(f"ENTSOG 429 on {endpoint} — retrying in {delay}s (attempt {attempt+1})")
+            logger.info(f"ENTSOG retry on {endpoint} in {delay}s (attempt {attempt+1})")
             time.sleep(delay)
         try:
             r = requests.get(url, params=params, headers=HEADERS, timeout=timeout)
@@ -57,10 +60,18 @@ def _query(endpoint: str, params: dict, timeout: int = 60) -> dict:
                     time.sleep(max(retry_after, _RETRY_DELAYS[attempt]))
                     continue
                 raise RuntimeError(f"ENTSOG 429 on {endpoint} after {len(_RETRY_DELAYS)} retries")
+            if r.status_code in _TRANSIENT_5XX:
+                if attempt < len(_RETRY_DELAYS):
+                    logger.warning(f"ENTSOG {r.status_code} on {endpoint} — will retry")
+                    continue
+                raise RuntimeError(f"ENTSOG {r.status_code} on {endpoint} after {len(_RETRY_DELAYS)} retries")
             r.raise_for_status()
             return r.json()
         except requests.exceptions.Timeout:
-            raise RuntimeError(f"ENTSOG timeout on {endpoint}")
+            if attempt < len(_RETRY_DELAYS):
+                logger.warning(f"ENTSOG timeout on {endpoint} — will retry")
+                continue
+            raise RuntimeError(f"ENTSOG timeout on {endpoint} after retries")
         except requests.exceptions.HTTPError as e:
             raise RuntimeError(f"ENTSOG HTTP {e.response.status_code} on {endpoint}")
         except RuntimeError:

@@ -20,6 +20,14 @@ import pandas as pd
 
 BASELINE_CACHE_PATH = Path("output/baseline_cache.csv")
 
+# All countries the pipeline is expected to produce data for.
+# Used to flag complete extractor failures in the coverage summary.
+EXPECTED_COUNTRIES = {
+    "AT","BE","BG","CZ","DE","DK","EE","ES","FI","FR",
+    "GB","GR","HR","HU","IT","LT","LV","NL","PL","PT",
+    "RO","SE","SI","SK",
+}
+
 from extractors.national import (
     GermanyTHEWebExtractor,
     FranceGRTGazExtractor,
@@ -277,14 +285,28 @@ def run(
     recent_df   = combined[combined["date"] >= from_date].copy()
     coverage    = build_coverage(recent_df, from_date, to_date)
 
-    logger.info(f"Pipeline complete: {len(recent_df)} rows across "
-                f"{recent_df['country'].nunique()} countries")
+    present = recent_df['country'].unique()
+    missing_countries = EXPECTED_COUNTRIES - set(present)
 
-    # Log coverage summary
-    for c in coverage:
+    logger.info(f"Pipeline complete: {len(recent_df)} rows across "
+                f"{len(present)}/{len(EXPECTED_COUNTRIES)} countries")
+
+    if missing_countries:
+        logger.error(
+            f"NO DATA for {len(missing_countries)} expected countries: "
+            f"{', '.join(sorted(missing_countries))} — check extractor logs above"
+        )
+
+    # Log coverage summary (all expected countries, flagging missing ones)
+    coverage_by_country = {c["country"]: c for c in coverage}
+    for country in sorted(EXPECTED_COUNTRIES):
+        if country not in coverage_by_country:
+            logger.error(f"  {country:4s}  *** NO DATA RETRIEVED ***")
+            continue
+        c = coverage_by_country[country]
         status = "✓" if c["complete"] else f"⚠ {c['days_missing']}d missing"
         prov   = f"  ({c['provisional']} provisional)" if c["provisional"] else ""
-        logger.info(f"  {c['country']:4s}  last={c['last_date']}  {status}{prov}")
+        logger.info(f"  {country:4s}  last={c['last_date']}  {status}{prov}")
 
     return combined, coverage
 

@@ -74,10 +74,16 @@ def main():
         )
 
     # Print coverage summary to terminal
+    from pipeline import EXPECTED_COUNTRIES
+    coverage_by_country = {c["country"]: c for c in coverage}
     print("\n── Coverage summary ─────────────────────────────────────────────")
     print(f"{'Country':<8} {'Source':<40} {'Last date':<12} {'Missing':>8} {'Prov':>6}")
     print("─" * 80)
-    for c in coverage:
+    for country in sorted(EXPECTED_COUNTRIES):
+        if country not in coverage_by_country:
+            print(f"✗ {country:<6} {'*** NO DATA RETRIEVED ***':<40} {'—':<12} {'—':>6}d  {'—':>5}")
+            continue
+        c = coverage_by_country[country]
         flag = "⚠" if c["days_missing"] > 0 else "✓"
         print(
             f"{flag} {c['country']:<6} {c['source'][:38]:<40} "
