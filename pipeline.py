@@ -37,6 +37,7 @@ from extractors.national import (
     CroatiaPlinacroExtractor,
     GreeceDesfaExtractor,
     FinlandGasgridExtractor,
+    EurostatICObsExtractor,
 )
 from extractors.entsog import ENTSOGDirectExtractor, ENTSOGPhysicalFlowExtractor
 from extractors.flow_derived import SlovakiaExtractor, FlowDerivedExtractor, FinlandLNGExtractor
@@ -80,6 +81,10 @@ def _build_extractors():
         ]),
         GreeceDesfaExtractor(),  # DESFA validated daily off-takes — full metered system
         PortugalRENExtractor(),
+        # Eurostat IC_OBS — validated final consumption; covers ~5 months ago and earlier.
+        # Registered before TSO extractors so method_rank dedup prefers it for covered months.
+        EurostatICObsExtractor("SK"),
+        EurostatICObsExtractor("HR"),
         CroatiaPlinacroExtractor(),
         ENTSOGPhysicalFlowExtractor("CZ", [
             "DIS-00208",   # Aggregated Distribution (CZ) — gas to DSOs

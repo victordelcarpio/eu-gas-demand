@@ -1285,3 +1285,82 @@ class FinlandGasgridExtractor(BaseExtractor):
         except Exception as e:
             logger.warning(f"Gasgrid Excel download: {e}")
             return pd.DataFrame()
+
+
+# ── Eurostat IC_OBS — validated inland consumption ────────────────────────────
+
+class EurostatICObsExtractor(BaseExtractor):
+    """
+    Eurostat nrg_cb_gasm IC_OBS (Inland Consumption, Observed) — validated
+    final monthly gas consumption distributed evenly across calendar days.
+
+    Use for countries where the primary TSO source is unreliable or incomplete
+    (SK — ENTSOG/AGSI balance underestimates; HR — Plinacro misses domestic
+    production). Eurostat IC_OBS is typically published with a 3-5 month lag,
+    so only covers months through ~5 months ago; the primary TSO extractor
+    fills in more recent months via method_rank deduplication.
+
+    Units: TJ (GCV) → divide by 3600 for TWh.
+    Monthly value is split evenly across all days in the month.
+    """
+    method      = "direct"
+    source_type = "full_metered"
+
+    EUROSTAT_URL = (
+        "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/nrg_cb_gasm"
+    )
+
+    def __init__(self, country: str):
+        self.country = country
+        self.source  = f"Eurostat IC_OBS ({country})"
+
+    def _fetch(self, from_date: date, to_date: date) -> pd.DataFrame:
+        import calendar
+        params = {
+            "format":          "JSON",
+            "lang":            "en",
+            "freq":            "M",
+            "nrg_bal":         "IC_OBS",
+            "siec":            "G3000",
+            "unit":            "TJ_GCV",
+            "geo":             self.country,
+            "sinceTimePeriod": from_date.strftime("%Y-%m"),
+        }
+        try:
+            r = requests.get(self.EUROSTAT_URL, params=params, timeout=30)
+            r.raise_for_status()
+            data = r.json()
+        except Exception as e:
+            logger.warning(f"Eurostat IC_OBS fetch for {self.country}: {e}")
+            return pd.DataFrame()
+
+        time_index = data.get("dimension", {}).get("time", {}).get("category", {}).get("index", {})
+        values     = data.get("value", {})
+        if not time_index or not values:
+            logger.warning(f"Eurostat IC_OBS: no data for {self.country}")
+            return pd.DataFrame()
+
+        # Build {period: twh} map
+        periods = {str(pos): period for period, pos in time_index.items()}
+        monthly: dict[str, float] = {}
+        for pos_str, val in values.items():
+            period = periods.get(pos_str)
+            if period and val is not None:
+                monthly[period] = float(val) / 3600  # TJ_GCV → TWh
+
+        records = []
+        for period, twh_month in monthly.items():
+            try:
+                yr, mo = int(period[:4]), int(period[5:7])
+            except (ValueError, IndexError):
+                continue
+            days_in_month = calendar.monthrange(yr, mo)[1]
+            twh_per_day   = twh_month / days_in_month
+            for day in range(1, days_in_month + 1):
+                d = date(yr, mo, day)
+                if from_date <= d <= to_date:
+                    records.append({"date": d, "twh": twh_per_day, "provisional": False})
+
+        if not records:
+            return pd.DataFrame()
+        return pd.DataFrame(records).sort_values("date").reset_index(drop=True)

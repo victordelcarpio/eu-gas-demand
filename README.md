@@ -20,11 +20,11 @@ built from primary national TSO and market operator sources.
 | Finland | Gasgrid transparency Excel | `full_metered` | D-2 |
 | Greece | DESFA validated off-takes | `full_metered` | D-3 |
 | Portugal | REN Data Hub | `full_metered` | D-2 |
-| Croatia | Plinacro SUKAP | `full_metered` | D-2 |
+| Croatia | Eurostat IC_OBS (validated); Plinacro SUKAP (recent months) | `full_metered` | ~5 months / D-2 |
+| Slovakia | Eurostat IC_OBS (validated); ENTSOG balance + AGSI (recent months) | `full_metered` / `flow_derived` | ~5 months / D-2 |
 | Netherlands | ENTSOG / GTS Physical Flow | `transmission_allocation` | D-2 |
 | Belgium, Poland, Hungary, Romania, Slovenia, Bulgaria | ENTSOG Physical Flow (DIS-/FNC- points) | `transmission_allocation` | D-2 |
 | Latvia | ENTSOG Physical Flow (FNC-00205) | `transmission_allocation` | D-2 |
-| Slovakia | ENTSOG aggregated balance + AGSI storage | `flow_derived` | D-2 |
 | Finland (fallback) | ALSI LNG sendout (Inkoo + Hamina) + ENTSOG | `flow_derived` | D-2 |
 | Sweden | Energinet Gasflow (DK→SE border) | `flow_derived` | D-2 |
 
